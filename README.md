@@ -9,7 +9,7 @@ next to the old one, Traefik switches once it is healthy — zero downtime.
 
 ## Install
 
-Plugins → Install Plugin → `https://raw.githubusercontent.com/greite/unraid-docker-rolling-update/main/docker.rolling.update.plg`
+Plugins → Install Plugin → `https://raw.githubusercontent.com/Greite/unraid-docker-rolling-update/main/docker.rolling.update.plg`
 
 Uninstalling restores the native Update button.
 

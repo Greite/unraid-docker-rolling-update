@@ -1,8 +1,8 @@
 <?xml version='1.0' standalone='yes'?>
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "docker.rolling.update">
-<!ENTITY author    "greite">
-<!ENTITY github    "greite/unraid-docker-rolling-update">
+<!ENTITY author    "GreiteTurtle">
+<!ENTITY github    "Greite/unraid-docker-rolling-update">
 <!ENTITY version   "2026.08.28">
 <!ENTITY md5       "401538f7a45cd688ce723731723361f7">
 <!ENTITY launch    "Settings/RollingUpdateSettings">
