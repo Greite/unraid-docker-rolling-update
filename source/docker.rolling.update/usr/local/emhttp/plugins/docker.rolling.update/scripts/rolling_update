@@ -171,6 +171,63 @@ function execCommand_nchan($command) {
   return $retval===0;
 }
 
+// ---------- recréation ----------
+/** Miroir de l'astuce Tailscale native : injecte ORG_ENTRYPOINT/ORG_CMD dans la commande. No-op si Tailscale est désactivé. */
+function tailscale_wrap(array $u): string {
+  global $DockerClient;
+  $cmd = $u['cmd'];
+  if (!$u['info']['tailscale']) return $cmd;
+  exec('docker create --name '.escapeshellarg($u['name']).' '.escapeshellarg($u['repo']).' 2>/dev/null');
+  $ci  = $DockerClient->getContainerDetails($u['name']);
+  $ts  = isset($ci['Config']['Entrypoint']) ? '-e ORG_ENTRYPOINT="'.implode(' ', $ci['Config']['Entrypoint']).'" ' : '';
+  $ts .= isset($ci['Config']['Cmd'])        ? '-e ORG_CMD="'.implode(' ', $ci['Config']['Cmd']).'" ' : '';
+  $cmd = str_replace('-l net.unraid.docker.managed=dockerman', $ts.'-l net.unraid.docker.managed=dockerman', $cmd);
+  exec('docker rm '.escapeshellarg($u['name']).' 2>/dev/null');
+  return $cmd;
+}
+/** connectExtraNetworks n'existe pas en 7.3.2 : ne rien faire dans ce cas. */
+function connect_extra(string $ctname, array $u): bool {
+  if (!function_exists('connectExtraNetworks')) return true;
+  return connectExtraNetworks($ctname, getXmlVal($u['xml'], 'ExtraNetworks'), $u['info']['network']);
+}
+/** Fin de mise à jour réussie : supprime l'ancien container, l'ancienne image, notifie. */
+function finish_ok(array $u): void {
+  global $DockerClient, $cfg;
+  if (ct_exists($u['rollback'])) removeContainer_nchan($u['rollback']);
+  $DockerClient->flushCaches();
+  if ($u['oldImageID'] !== '' && $u['oldImageID'] !== $u['newImageID']) removeImage_nchan($u['oldImageID']);
+  if (($cfg['NOTIFY'] ?? 'yes') === 'yes') notify_unraid('normal', "{$u['name']}: updated", "Container {$u['name']} was updated and passed its health gate.");
+  log_line('<b>'.htmlspecialchars($u['name']).' updated successfully</b>');
+}
+/** Mode sûr : stop → rename en .rollback → run → (porte de santé, tâche 7) → nettoyage. */
+function update_safe(array $u): string {
+  global $DockerClient;
+  $GLOBALS['inflight'] = $u;
+  if ($u['wasRunning']) { stopContainer_nchan($u['name']); $GLOBALS['inflight']['stoppedOld'] = true; }
+  if ($u['exists']) {
+    $out = dk('rename '.escapeshellarg($u['name']).' '.escapeshellarg($u['rollback']), $rc);
+    if ($rc !== 0) {
+      log_err("Could not rename {$u['name']} to {$u['rollback']}: $out");
+      if ($u['wasRunning']) $DockerClient->startContainer($u['name']);
+      return 'rolled';
+    }
+    log_info("Previous container kept as {$u['rollback']} until the new one is verified");
+  }
+  $cmd = tailscale_wrap($u);
+  if ($u['wasRunning']) $cmd = str_replace('/docker create ', '/docker run -d ', $cmd);
+  $err = null;
+  if (!execCommand_nchan($cmd))              $err = 'docker run failed';
+  elseif (!connect_extra($u['name'], $u))    $err = 'could not connect one or more additional networks';
+  elseif ($u['wasRunning'])                  addRoute($u['name']);
+  if ($err !== null) {
+    log_err("Update of {$u['name']} failed: $err. Previous container is still available as {$u['rollback']}.");   // rollback automatique en tâche 7
+    return 'rolled';
+  }
+  unset($GLOBALS['inflight']);
+  finish_ok($u);
+  return 'ok';
+}
+
 // ---------- un container ----------
 /** Retourne 'ok' | 'rolled' | 'skipped'. */
 function update_one(string $name): string {
@@ -203,9 +260,7 @@ function update_one(string $name): string {
     if (!$missing) $strategy = 'bluegreen';
     else { log_warn('bluegreen strategy not applicable, using safe mode:'); foreach ($missing as $m) log_line('&nbsp;&nbsp;- '.htmlspecialchars($m)); }
   }
-  // dry-run (tâche 5) : remplacé par update_safe / update_bluegreen dans les tâches 6 et 11
-  log_info("DRY RUN: strategy=$strategy probe={$u['probe']['type']} timeout={$u['probe']['timeout']}s grace={$u['probe']['grace']}s running=".($u['wasRunning'] ? 'yes' : 'no')." oldImage={$u['oldImageID']} newImage={$u['newImageID']}");
-  return 'skipped';
+  return update_safe($u);   // update_bluegreen arrive en tâche 11
 }
 
 // ---------- boucle principale ----------
