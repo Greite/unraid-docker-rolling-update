@@ -226,13 +226,18 @@ function wait_healthy(string $name, array $probe): ?string {
   $waitID = mt_rand();
   $what   = $probe['type'].(in_array($probe['type'], ['http', 'tcp'], true) ? ' '.$probe['target'] : '');
   write("<p class='logLine'></p>", "addLog\0<fieldset class='docker'><legend>Health gate: ".htmlspecialchars($what)." (timeout {$probe['timeout']}s)</legend><p class='logLine'></p><span id='wait-$waitID'>Please wait </span></fieldset>", "show_Wait\0$waitID");
-  $start = time(); $deadline = $start + $probe['timeout']; $ok = false; $reason = '';
+  $start = time(); $deadline = $start + $probe['timeout']; $ok = false; $reason = ''; $fellBack = false;
   while (true) {
     $d = $DockerClient->getContainerDetails($name);
     $state = $d['State'] ?? [];
     if (empty($state['Running'])) { $reason = 'container exited (code '.($state['ExitCode'] ?? '?').')'; break; }
     switch ($probe['type']) {
       case 'health':
+        if (!isset($state['Health'])) {
+          // R11 : pas d'objet Health du tout (healthcheck désactivé) -> repli sur la probe running plutôt que d'attendre le timeout
+          if (!$fellBack) { $fellBack = true; $probe['type'] = 'running'; log_warn('No healthcheck on the running container (disabled?), falling back to the running probe'); }
+          break;
+        }
         $h = $state['Health']['Status'] ?? null;
         if ($h === 'healthy')   $ok = true;
         if ($h === 'unhealthy') $reason = 'healthcheck reported unhealthy';
@@ -266,7 +271,9 @@ function wait_healthy(string $name, array $probe): ?string {
 function restore_image(string $repo, string $oldImageID, string $newImageID): void {
   global $DockerClient, $DockerUpdate;
   if ($oldImageID === '' || $oldImageID === $newImageID) return;
-  dk('tag '.escapeshellarg($oldImageID).' '.escapeshellarg($repo));
+  // R11 : si le re-tag échoue, ne surtout pas supprimer la nouvelle image
+  dk('tag '.escapeshellarg($oldImageID).' '.escapeshellarg($repo), $rc);
+  if ($rc !== 0) { log_err("Could not re-tag $repo to the previous image - the new image is kept"); return; }
   $DockerClient->removeImage($newImageID);            // échoue sans conséquence si une autre container l'utilise
   $DockerClient->flushCaches();
   $DockerUpdate->reloadUpdateStatus($repo);           // le badge « update ready » revient : l'état vrai
@@ -334,6 +341,56 @@ function update_safe(array $u): string {
   return 'ok';
 }
 
+// ---------- bluegreen ----------
+/** L'ancien a été arrêté : le remettre en service, supprimer la nouvelle instance, restaurer l'image. */
+function rollback_bg(array $u, string $reason): void {
+  global $DockerClient;
+  log_err("Update of {$u['name']} rolled back: $reason");
+  if (ct_exists($u['rollback'])) dk('rename '.escapeshellarg($u['rollback']).' '.escapeshellarg($u['name']));
+  if (ct_exists($u['new']))      dk('rm -f '.escapeshellarg($u['new']));
+  if (ct_exists($u['name'])) {
+    $r = $DockerClient->startContainer($u['name']);
+    if ($r !== true) log_err("Could not restart the previous container: $r - manual intervention required");
+    else log_info("Previous container {$u['name']} restarted");
+  }
+  restore_image($u['repo'], $u['oldImageID'], $u['newImageID']);
+  $DockerClient->flushCaches();
+  notify_unraid('alert', "{$u['name']}: update rolled back", $reason);
+}
+/** Nouvelle instance <nom>.new à côté de l'ancienne ; Traefik bascule une fois healthy ; puis double rename. */
+function update_bluegreen(array $u): string {
+  global $DockerClient;
+  $GLOBALS['inflight'] = $u;
+  log_line('<b>Strategy: bluegreen</b> - new instance started alongside the old one, switched by Traefik once healthy');
+  if (ct_exists($u['new'])) { log_warn("Removing leftover {$u['new']}"); dk('rm -f '.escapeshellarg($u['new'])); }
+  $cmd = str_replace('/docker create ', '/docker run -d ', $u['cmd']);
+  $cmd = str_replace('--name='.escapeshellarg($u['name']), '--name='.escapeshellarg($u['new']), $cmd);   // format exact de xmlToCommand
+  $err = null;
+  if (!execCommand_nchan($cmd))            $err = 'docker run failed';
+  elseif (!connect_extra($u['new'], $u))   $err = 'could not connect one or more additional networks';
+  else                                     $err = wait_healthy($u['new'], $u['probe']);
+  if ($err !== null) {                     // rollback sans coupure : l'ancien n'a jamais été arrêté
+    log_err("Update of {$u['name']} rolled back: $err");
+    if (ct_exists($u['new'])) { container_logs($u['new']); dk('rm -f '.escapeshellarg($u['new'])); }
+    restore_image($u['repo'], $u['oldImageID'], $u['newImageID']);
+    $DockerClient->flushCaches();
+    notify_unraid('alert', "{$u['name']}: update rolled back", $err);
+    unset($GLOBALS['inflight']);
+    return 'rolled';
+  }
+  stopContainer_nchan($u['name']);         // Traefik retire l'ancienne instance sur l'événement stop
+  $GLOBALS['inflight']['stoppedOld'] = true;
+  $out = dk('rename '.escapeshellarg($u['name']).' '.escapeshellarg($u['rollback']), $rc);
+  if ($rc !== 0) { rollback_bg($u, "rename failed: $out"); unset($GLOBALS['inflight']); return 'rolled'; }
+  $out = dk('rename '.escapeshellarg($u['new']).' '.escapeshellarg($u['name']), $rc);
+  if ($rc !== 0) { rollback_bg($u, "rename failed: $out"); unset($GLOBALS['inflight']); return 'rolled'; }
+  unset($GLOBALS['inflight']);             // point de non-retour : la nouvelle instance porte le nom
+  addRoute($u['name']);
+  log_info("Switched: {$u['name']} is now the new instance");
+  finish_ok($u);
+  return 'ok';
+}
+
 // ---------- un container ----------
 /** Retourne 'ok' | 'rolled' | 'skipped'. */
 function update_one(string $name): string {
@@ -366,7 +423,7 @@ function update_one(string $name): string {
     if (!$missing) $strategy = 'bluegreen';
     else { log_warn('bluegreen strategy not applicable, using safe mode:'); foreach ($missing as $m) log_line('&nbsp;&nbsp;- '.htmlspecialchars($m)); }
   }
-  return update_safe($u);   // update_bluegreen arrive en tâche 11
+  return $strategy === 'bluegreen' ? update_bluegreen($u) : update_safe($u);
 }
 
 // ---------- boucle principale ----------

@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>RollingBG</Name>
+  <Repository>nginx:stable-alpine</Repository>
+  <Registry>https://hub.docker.com/_/nginx</Registry>
+  <Network>frontend</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support/>
+  <Project/>
+  <Overview>Throwaway container for docker.rolling.update blue/green tests</Overview>
+  <Category>Tools:</Category>
+  <WebUI>http://rollingbg.test/</WebUI>
+  <TemplateURL/>
+  <Icon/>
+  <ExtraParams>--health-cmd="wget -qO- http://127.0.0.1/ || exit 1" --health-interval=5s --health-timeout=3s</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled>0</DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <!--PORT-->
+  <Config Name="traefik.enable" Target="traefik.enable" Default="true" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="router rule" Target="traefik.http.routers.rollingbg.rule" Default="" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">Host(`rollingbg.test`)</Config>
+  <Config Name="router entrypoints" Target="traefik.http.routers.rollingbg.entrypoints" Default="" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">web</Config>
+  <Config Name="router service" Target="traefik.http.routers.rollingbg.service" Default="" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">rollingbg</Config>
+  <Config Name="service port" Target="traefik.http.services.rollingbg.loadbalancer.server.port" Default="" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">80</Config>
+  <Config Name="rolling.strategy" Target="rolling.strategy" Default="" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">bluegreen</Config>
+  <Config Name="rolling.probe" Target="rolling.probe" Default="" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">@PROBE@</Config>
+  <Config Name="rolling.timeout" Target="rolling.timeout" Default="" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">@TIMEOUT@</Config>
+</Container>
