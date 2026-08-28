@@ -1,0 +1,219 @@
+#!/usr/bin/php -q
+<?php
+/* docker.rolling.update — mise à jour séquentielle avec porte de santé et rollback automatique.
+ * Appelé par openDocker('rolling_update nom1*nom2') ; sortie streamée dans la modale native (canal nchan 'docker').
+ * GPL-2.0. Réutilise des portions de dynamix.docker.manager (Copyright Lime Technology / Bergware International). */
+
+if (($argv[1] ?? '') === '--selftest') {           // avant tout include Unraid : tourne sur n'importe quel PHP
+  require __DIR__.'/../include/rolling.php';
+  exit(rolling_selftest() ? 0 : 1);
+}
+
+$docroot ??= ($_SERVER['DOCUMENT_ROOT'] ?: '/usr/local/emhttp');
+require_once "$docroot/webGui/include/Wrappers.php";
+extract(parse_plugin_cfg('dynamix', true));          // $display, $notify (méthodes de notification Docker)
+$_SERVER['REQUEST_URI'] = '';
+$login_locale = _var($display, 'locale');
+require_once "$docroot/plugins/dynamix.docker.manager/include/DockerClient.php";
+require_once "$docroot/webGui/include/publish.php";
+require_once __DIR__.'/../include/rolling.php';
+
+$cfg = parse_plugin_cfg('docker.rolling.update');
+$var = parse_ini_file('/var/local/emhttp/var.ini');
+$DockerClient    = new DockerClient();
+$DockerUpdate    = new DockerUpdate();
+$DockerTemplates = new DockerTemplates();
+$custom = DockerUtil::custom();                       // requis par xmlToCommand
+$subnet = DockerUtil::network($custom);
+$cpus   = DockerUtil::cpus();
+
+// ---------- sortie vers la modale (protocole natif) + stdout optionnel ----------
+function write(...$messages) {
+  foreach ($messages as $m) {
+    publish('docker', $m, 1, false);
+    if (getenv('ROLLING_STDOUT')) echo trim(strip_tags(str_replace(["\0", '<br>'], [' ', "\n"], $m)))."\n";
+  }
+}
+function log_line(string $html): void { write("addLog\0$html"); }
+function log_info(string $txt): void  { log_line(htmlspecialchars($txt)); }
+function log_warn(string $txt): void  { log_line("<span class='orange-text'><b>Warning:</b> ".htmlspecialchars($txt).'</span>'); }
+function log_err(string $txt): void   { log_line("<span class='error'><b>Error:</b> ".htmlspecialchars($txt).'</span>'); }
+
+// ---------- petits helpers Docker ----------
+function dk(string $args, ?int &$rc = null): string { exec("docker $args 2>&1", $out, $rc); return trim(implode("\n", $out)); }
+function ct_exists(string $name): bool { global $DockerClient; return !empty($DockerClient->getContainerDetails($name)); }
+function image_has_health(string $imageID): bool {
+  if ($imageID === '') return false;
+  $j = json_decode(dk("image inspect -f '{{json .Config.Healthcheck}}' ".escapeshellarg($imageID)), true);
+  return is_array($j) && !empty($j['Test']) && $j['Test'][0] !== 'NONE';
+}
+function network_driver(string $network): ?string {
+  if ($network === '') return null;
+  $d = dk("network inspect -f '{{.Driver}}' ".escapeshellarg($network), $rc);
+  return $rc === 0 ? $d : null;
+}
+function container_logs(string $name, int $tail = 50): void {
+  $l = dk("logs --tail $tail ".escapeshellarg($name));
+  if ($l !== '') log_line("<fieldset class='docker'><legend>Last $tail log lines of ".htmlspecialchars($name)."</legend><pre style='white-space:pre-wrap'>".htmlspecialchars($l).'</pre></fieldset>');
+}
+function notify_unraid(string $importance, string $subject, string $description): void {
+  global $docroot, $var, $notify;
+  $server = strtoupper(_var($var, 'NAME', 'tower'));
+  $output = _var($notify, 'docker_notify');           // mêmes canaux que les notifications Docker natives
+  exec("$docroot/webGui/scripts/notify -e ".escapeshellarg('Docker Rolling Update').' -s '.escapeshellarg("Notice [$server] - $subject").' -d '.escapeshellarg($description).' -i '.escapeshellarg(trim("$importance $output"))." -l '/Docker' -x");
+}
+
+// ---------- helpers natifs (copie de dynamix.docker.manager/scripts/update_container) ----------
+function stopContainer_nchan($name) {
+  global $DockerClient;
+  $waitID = mt_rand();
+  write("<p class='logLine'></p>","addLog\0<fieldset class='docker'><legend>"._('Stopping container').": ".htmlspecialchars($name)."</legend><p class='logLine'></p><span id='wait-$waitID'>"._('Please wait')." </span></fieldset>","show_Wait\0$waitID");
+  $retval = $DockerClient->stopContainer($name);
+  $out = ($retval === true) ? _('Successfully stopped container').": $name" : _('Error').": ".$retval;
+  write("stop_Wait\0$waitID","addLog\0<b>".htmlspecialchars($out)."</b>");
+}
+function removeContainer_nchan($name) {
+  global $DockerClient;
+  $waitID = mt_rand();
+  write("<p class='logLine'></p>","addLog\0<fieldset class='docker'><legend>"._('Removing container').": ".htmlspecialchars($name)."</legend><p class='logLine'></p><span id='wait-$waitID'>"._('Please wait')." </span></fieldset>","show_Wait\0$waitID");
+  $retval = $DockerClient->removeContainer($name);
+  $out = ($retval === true) ? _('Successfully removed container').": $name" : _('Error').": ".$retval;
+  write("stop_Wait\0$waitID","addLog\0<b>".htmlspecialchars($out)."</b>");
+}
+function removeImage_nchan($image) {
+  global $DockerClient;
+  $waitID = mt_rand();
+  write("<p class='logLine'></p>","addLog\0<fieldset class='docker'><legend>"._('Removing orphan image').": ".htmlspecialchars($image)."</legend><p class='logLine'></p><span id='wait-$waitID'>"._('Please wait')." </span></fieldset>","show_Wait\0$waitID");
+  $retval = $DockerClient->removeImage($image);
+  $out = ($retval === true) ? _('Successfully removed orphan image').": $image" : _('Error').": ".$retval;
+  write("stop_Wait\0$waitID","addLog\0<b>".htmlspecialchars($out)."</b>");
+}
+function pullImage_nchan($name, $image) {
+  global $DockerClient, $DockerTemplates, $DockerUpdate;
+  $waitID = mt_rand();
+  if (!preg_match("/:\S+$/", $image)) $image .= ":latest";
+  write("<p class='logLine'></p>","addLog\0<fieldset class='docker'><legend>"._('Pulling image').": ".htmlspecialchars($image)."</legend><p class='logLine'></p><span id='wait-$waitID'>"._('Please wait')." </span></fieldset>","show_Wait\0$waitID");
+  $alltotals = [];
+  $laststatus = [];
+  $strError = '';
+  $DockerClient->pullImage($image, function ($line) use (&$alltotals, &$laststatus, &$waitID, &$strError, $image, $DockerClient, $DockerUpdate) {
+    $cnt = json_decode($line, true);
+    $id = $cnt['id'] ?? '';
+    $status = $cnt['status'] ?? '';
+    if (isset($cnt['error'])) $strError = $cnt['error'];
+    if ($waitID !== false) {
+      write("stop_Wait\0$waitID");
+      $waitID = false;
+    }
+    if (empty($status)) return;
+    if (!empty($id)) {
+      if (!empty($cnt['progressDetail']) && !empty($cnt['progressDetail']['total'])) {
+        $alltotals[$id] = $cnt['progressDetail']['total'];
+      }
+      if (empty($laststatus[$id])) {
+        $laststatus[$id] = '';
+      }
+      switch ($status) {
+      case 'Waiting':
+        break;
+      case 'Downloading':
+        if ($laststatus[$id] != $status) {
+          write("addToID\0$id\0".htmlspecialchars($status));
+        }
+        $total = $cnt['progressDetail']['total'];
+        $current = $cnt['progressDetail']['current'];
+        if ($total > 0) {
+          $percentage = round(($current / $total) * 100);
+          write("progress\0$id\0 ".$percentage."% "._('of')." ".$DockerClient->formatBytes($total));
+        } else {
+          $alltotals[$id] = $current;
+          write("progress\0$id\0".$DockerClient->formatBytes($current));
+        }
+        break;
+      default:
+        if ($laststatus[$id] == "Downloading") {
+          write("progress\0$id\0 100% "._('of')." ".$DockerClient->formatBytes($alltotals[$id]));
+        }
+        if ($laststatus[$id] != $status) {
+          write("addToID\0".($id=='latest'?mt_rand():$id)."\0".htmlspecialchars($status));
+        }
+        break;
+      }
+      $laststatus[$id] = $status;
+    } else {
+      if (strpos($status, 'Status: ') === 0) {
+        write("addLog\0".htmlspecialchars($status));
+      }
+      if (strpos($status, 'Digest: ') === 0) {
+        $DockerUpdate->setUpdateStatus($image, substr($status,8));
+      }
+    }
+  });
+  write("addLog\0<br><b>"._('TOTAL DATA PULLED').":</b> ".$DockerClient->formatBytes(array_sum($alltotals)));
+  if (!empty($strError)) {
+    write("addLog\0<br><span class='error'><b>"._('Error').":</b> ".htmlspecialchars($strError)."</span>");
+    return false;
+  }
+  return true;
+}
+function execCommand_nchan($command) {
+  $waitID = mt_rand();
+  [$cmd,$args] = explode(' ',$command,2);
+  write("<p class='logLine'></p>","addLog\0<fieldset class='docker'><legend>"._('Command execution')."</legend>".basename($cmd).' '.str_replace(" -","<br>&nbsp;&nbsp;-",htmlspecialchars($args))."<br><span id='wait-$waitID'>"._('Please wait')." </span><p class='logLine'></p></fieldset>","show_Wait\0$waitID");
+  $proc = popen("$command 2>&1",'r');
+  while ($out = fgets($proc)) {
+    $out = preg_replace("%[\t\n\x0B\f\r]+%", '',$out);
+    write("addLog\0".htmlspecialchars($out));
+  }
+  $retval = pclose($proc);
+  $out = $retval ? _('The command failed').'.' : _('The command finished successfully').'!';
+  write("stop_Wait\0$waitID","addLog\0<br><b>$out</b>");
+  return $retval===0;
+}
+
+// ---------- un container ----------
+/** Retourne 'ok' | 'rolled' | 'skipped'. */
+function update_one(string $name): string {
+  global $DockerClient, $DockerTemplates, $cfg;
+  $tmpl = $DockerTemplates->getUserTemplate($name);
+  if (!$tmpl) { log_err("Configuration not found for '$name'. Was this container created using the Docker template system?"); return 'skipped'; }
+  $xml = file_get_contents($tmpl);
+  [$cmd, $Name, $Repository] = xmlToCommand($tmpl);
+  $info = template_info($xml);
+  $u = ['name'=>$Name, 'rollback'=>"$Name.rollback", 'new'=>"$Name.new", 'repo'=>DockerUtil::ensureImageTag($Repository),
+        'cmd'=>$cmd, 'xml'=>$xml, 'info'=>$info, 'exists'=>false, 'wasRunning'=>false,
+        'oldImageID'=>'', 'newImageID'=>'', 'probe'=>[], 'stoppedOld'=>false];
+  log_line("<p class='logLine'></p><b>=== ".htmlspecialchars($Name).' ===</b>');
+  if (ct_exists($u['rollback'])) {
+    log_err("A container named {$u['rollback']} already exists (a previous update was interrupted). Check it, then remove or rename it manually.");
+    return 'skipped';
+  }
+  $old = $DockerClient->getContainerDetails($Name);
+  $u['exists']     = !empty($old);
+  $u['wasRunning'] = !empty($old['State']['Running']);
+  $u['oldImageID'] = $DockerClient->getImageID($Repository) ?: '';
+  if (!pullImage_nchan($Name, $Repository)) return 'skipped';   // rien n'a été touché
+  $DockerClient->flushCaches();
+  $u['newImageID'] = $DockerClient->getImageID($Repository) ?: '';
+  $hasHealth  = image_has_health($u['newImageID']) || extra_has_health($info['extra']);
+  $u['probe'] = resolve_probe($info['labels'], $hasHealth, $cfg);
+  $strategy = 'safe';
+  if (($info['labels']['rolling.strategy'] ?? 'safe') === 'bluegreen') {
+    $missing = check_bluegreen($info, $u['wasRunning'], $hasHealth, network_driver($info['network']));
+    if (!$missing) $strategy = 'bluegreen';
+    else { log_warn('bluegreen strategy not applicable, using safe mode:'); foreach ($missing as $m) log_line('&nbsp;&nbsp;- '.htmlspecialchars($m)); }
+  }
+  // dry-run (tâche 5) : remplacé par update_safe / update_bluegreen dans les tâches 6 et 11
+  log_info("DRY RUN: strategy=$strategy probe={$u['probe']['type']} timeout={$u['probe']['timeout']}s grace={$u['probe']['grace']}s running=".($u['wasRunning'] ? 'yes' : 'no')." oldImage={$u['oldImageID']} newImage={$u['newImageID']}");
+  return 'skipped';
+}
+
+// ---------- boucle principale ----------
+write("<style>.logLine{font-family:bitstream!important;font-size:1.2rem!important;margin:0;padding:0}fieldset.docker{border:solid thin;margin-top:8px}legend{font-size:1.1rem!important;font-weight:bold}</style><p class='logLine'></p>");
+$summary = ['ok'=>[], 'rolled'=>[], 'skipped'=>[]];
+foreach (array_filter(explode('*', rawurldecode($argv[1] ?? ''))) as $name) {
+  $summary[update_one($name)][] = $name;
+}
+log_line('<br><b>Summary:</b> '.count($summary['ok']).' updated, '.count($summary['rolled']).' rolled back, '.count($summary['skipped']).' skipped');
+write('_DONE_', '');
+exit(count($summary['rolled']) ? 1 : 0);
