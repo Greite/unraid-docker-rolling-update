@@ -28,3 +28,9 @@
 - Per-container settings are labels (`rolling.strategy|probe|timeout|grace`), not new UI
 - Gitflow: work on `feature/*` from `develop`, releases to `main` with a signed `vYYYY.MM.DD` tag; commit messages in English (conventional commits)
 - Never commit or mention in commits: the test server name, personal domains, real hosts (use `local.mk`); never pass `-c user.email` - the repo's git profile signs commits
+
+## Release
+- `git checkout -b release/YYYY.MM.DD develop` -> add a `###YYYY.MM.DD` entry to `<CHANGES>` in the .plg -> `make build VERSION=YYYY.MM.DD` (rewrites the version/md5 entities only) -> commit -> merge --no-ff into `main`, back into `develop` -> `git tag -s vYYYY.MM.DD` -> push `main develop --tags`
+- `.plg` `author` is `GreiteTurtle` and GitHub paths are `Greite/...` (same as the other plugins); the Plugins tab reads `plugins/<id>/README.md` (first bold line = display name)
+- raw.githubusercontent.com caches the .plg/.txz for a few minutes after a push: do not `plugin install` from the URL right away
+- The test server name lives in git-ignored `local.mk` (`HOST = ...`), never in committed files
