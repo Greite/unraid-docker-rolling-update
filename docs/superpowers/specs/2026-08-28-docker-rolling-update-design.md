@@ -14,12 +14,18 @@ chaque container est mis à jour **un par un**, la nouvelle version passe une
 l'ancien container est **restauré automatiquement** (image comprise), avec une
 notification Unraid expliquant pourquoi.
 
+En option, par label `rolling.strategy=bluegreen`, les containers derrière
+**Traefik (provider Docker)** sont mis à jour **sans coupure** : nouvelle
+instance démarrée à côté de l'ancienne, bascule par le proxy une fois `healthy`
+(§4bis). Si un prérequis manque, le plugin retombe sur le mode sûr en disant
+pourquoi.
+
 ### Non-objectifs (v1)
 
-- Zéro-downtime réel (nouvelle version démarrée à côté de l'ancienne). Impossible
-  sur Unraid pour la majorité des containers : ports host publiés, IP fixe `br0`,
-  volumes partagés (migrations de BDD sur données live). Le downtime reste celui
-  du natif : stop → start.
+- Zéro-downtime **général**. Il exige un composant qui bascule le trafic ; hors
+  Traefik (provider Docker) et hors applications tolérant deux instances
+  simultanées sur les mêmes données, le downtime reste celui du natif
+  (stop → start). Périmètre exact en §4bis.
 - Auto-update planifié (cron). CA Auto Update reste sur le flux natif ; v2.
 - Containers gérés par compose (`net.unraid.docker.managed=composeman`) : ignorés,
   comme le bouton Update natif.
@@ -44,6 +50,8 @@ notification Unraid expliquant pourquoi.
 | Statut « update ready » : `DockerUpdate::setUpdateStatus()` sur le `Digest:` du pull ; `reloadUpdateStatus($image)` recompare local/remote | `include/DockerClient.php` |
 | Notifications : `/usr/local/emhttp/webGui/scripts/notify -e -s -d -i normal\|warning\|alert -l /Docker -x` | `webGui/scripts/notify` |
 | Config plugin : `parse_plugin_cfg('<nom>')` lit `/boot/config/plugins/<nom>/<nom>.cfg` | convention Unraid |
+| Traefik 3.7 sur test-server : provider Docker, `exposedByDefault: false`, `network: frontend`. Le provider **ignore les containers dont le health est `starting`/`unhealthy`** ; deux containers définissant le même router avec des valeurs différentes → router supprimé (erreur de merge) ; le même service défini par deux containers → serveurs fusionnés (load-balancing, mécanisme de `compose --scale`) | `/mnt/user/appdata/traefik/traefik.yaml`, provider Docker de Traefik |
+| Les containers `frontend` de test-server ont des routers nommés (`portfolio-https`…) **sans `service` explicite**, et publient tous un port host hérité du template | `docker inspect` sur test-server |
 
 ## 3. Architecture
 
@@ -68,11 +76,13 @@ Séquentiel, un container à la fois (c'est le « rolling » à l'échelle du pa
 Pour chaque nom :
 
 1. **Résolution** : `DockerTemplates::getUserTemplate(nom)` → `xmlToCommand()` →
-   `[$cmd, $Name, $Repository]`. Mémoriser `oldImageID`, `wasRunning`
-   (`getContainerDetails` → `State.Running`).
+   `[$cmd, $Name, $Repository]`. Lecture des labels `rolling.*` du template (§5).
+   Mémoriser `oldImageID`, `wasRunning` (`getContainerDetails` → `State.Running`).
    - Template introuvable → message natif « Configuration not found », suivant.
    - `<nom>.rollback` existe déjà (crash précédent) → « nettoyage manuel requis »,
      suivant.
+   - `rolling.strategy=bluegreen` et prérequis §4bis satisfaits → **flux §4bis**.
+     Prérequis manquant → la modale liste ce qui manque, et on continue ici.
 2. **Pull** : copie du `pullImage_nchan` natif (progression par layer,
    `setUpdateStatus` sur `Digest:`). Échec → suivant (rien n'a été touché).
 3. **Stop gracieux** si `wasRunning` (`DockerClient::stopContainer`).
@@ -91,13 +101,90 @@ Pour chaque nom :
 9. Résumé final : « N mis à jour, M restaurés ». `write('_DONE_')`. Code de
    sortie 1 si M > 0, 0 sinon (ignoré en 7.3.2, exploité par le tray de `master`).
 
+## 4bis. Stratégie `bluegreen` (opt-in : label `rolling.strategy=bluegreen`)
+
+Zéro-downtime pour les containers derrière **Traefik (provider Docker)**. Le
+proxy joue le rôle de l'orchestrateur : il découvre la nouvelle instance par ses
+labels, ne lui envoie du trafic qu'une fois `healthy`, répartit entre les deux
+instances, puis retire l'ancienne à son arrêt.
+
+### Prérequis
+
+Vérifiés **avant toute action** ; un seul manquant → repli sur le mode sûr, la
+modale liste exactement ce qui manque (checklist de migration ci-dessous).
+
+| # | Prérequis | Vérification | Pourquoi |
+|---|---|---|---|
+| 1 | Réseau = bridge utilisateur (`frontend`…) | template `<Network>` ∉ {`bridge`,`host`,`none`,`container:*`} et `docker network inspect -f '{{.Driver}}'` = `bridge` | Traefik joint le container par son IP sur ce réseau |
+| 2 | Aucun port host publié | aucun `<Config Type="Port">` dans le template, pas de `-p`/`--publish` dans `ExtraParams` | un port host n'a qu'un propriétaire |
+| 3 | Pas d'IP fixe | `<MyIP>` vide, pas de `--ip` dans `ExtraParams` | idem pour l'IP |
+| 4 | Healthcheck | après pull : image `Config.Healthcheck` présent et `Test[0] ≠ NONE`, ou `--health-cmd` dans `ExtraParams` | Traefik 3 ignore `starting`/`unhealthy` ; sans healthcheck il routerait vers une instance en plein boot |
+| 5 | Labels Traefik complets | pour chaque `traefik.(http\|tcp\|udp).routers.<r>.*` : un `…routers.<r>.service=<s>` existe **et** `traefik.<proto>.services.<s>.loadbalancer.server.port` existe ; au moins un router défini | sans service explicite Traefik lie chaque router au service par défaut nommé d'après le container → deux définitions différentes du même router pendant le recouvrement → router supprimé = coupure |
+| 6 | Tailscale désactivé | `<TailscaleEnabled>` ≠ `true` | sidecar lié au nom du container |
+| 7 | Container en cours d'exécution | `wasRunning` | rien à recouvrir sinon |
+
+L'application doit **tolérer deux instances simultanées sur les mêmes données**
+(stateless, ou BDD externe avec migrations compatibles). Le plugin ne peut pas
+le vérifier : c'est documenté, et poser le label est la responsabilité de
+l'utilisateur. Sur test-server : Portfolio, ITTools (oui) ; WordPress/Woocommerce
+(oui, avec réserve) ; pas Vaultwarden/Jellyfin/Seerr (SQLite) ni Immich
+(migrations Postgres au boot).
+
+### Flux
+
+1. Résolution + prérequis. Un `<nom>.new` résiduel (crash précédent) est
+   supprimé d'office (`docker rm -f`) : il est toujours jetable, contrairement
+   à `<nom>.rollback`.
+2. Pull (identique au mode sûr).
+3. **`docker run -d` du nouveau sous le nom `<nom>.new`** : commande du template
+   avec `'--name='.escapeshellarg($Name)` (format exact de `xmlToCommand`,
+   `Helpers.php:400`) remplacé par `'--name='.escapeshellarg("$Name.new")` —
+   même technique de `str_replace` que le natif pour `create` → `run -d`.
+   `.` est autorisé dans les noms Docker. Labels identiques →
+   Traefik fusionne les deux containers dans le même service. Puis
+   `connectExtraNetworks()` si disponible.
+4. **Porte de santé sur `<nom>.new`** (§5, défaut `health`). Échec →
+   **rollback sans coupure** : l'ancien n'a jamais été arrêté. `docker rm -f
+   <nom>.new`, re-tag de l'image (§6.4), `reloadUpdateStatus`, notification
+   `alert`, suivant.
+5. Succès → Traefik répartit déjà entre les deux. **Stop gracieux de l'ancien**
+   (Traefik le retire sur l'événement `stop`, ~1 s).
+6. `docker rename <nom> <nom>.rollback` puis `docker rename <nom>.new <nom>`.
+   Routers/services étant nommés explicitement, la config Traefik ne change
+   pas ; le nom DNS Docker `<nom>` bascule sur la nouvelle instance (fenêtre de
+   quelques ms entre les deux renames). Un rename en échec → restauration :
+   rename inverse si nécessaire, `docker start` de l'ancien, `rm -f <nom>.new`,
+   notification `alert`.
+7. Nettoyage identique au mode sûr (§4.8) : `rm <nom>.rollback`, suppression de
+   l'ancienne image, notification.
+
+Coupure résiduelle : les requêtes en vol sur l'ancienne instance au moment du
+`stop` (Traefik ne retente pas par défaut). Pendant quelques secondes les deux
+versions servent en parallèle — c'est la définition d'un rolling update.
+Pendant le recouvrement, la page Docker d'Unraid affiche `<nom>.new` comme
+container orphelin ; c'est transitoire.
+
+### Migrer un container existant (checklist, reprise dans le message de repli)
+
+1. Retirer les mappings de ports du template (derrière Traefik ils ne servent
+   qu'au bouton WebUI : mettre l'URL publique dans le champ `WebUI`).
+2. Ajouter un healthcheck si l'image n'en a pas :
+   `--health-cmd=… --health-interval=10s` en Extra Parameters.
+3. Ajouter les labels `traefik.http.routers.<r>.service=<s>` et
+   `traefik.http.services.<s>.loadbalancer.server.port=<port>`.
+4. Ajouter le label `rolling.strategy=bluegreen`.
+
 ## 5. Porte de santé
 
-Lue sur les **labels du nouveau container** (`Config.Labels` via inspect) ; les
-valeurs absentes tombent sur la config globale.
+Tous les labels `rolling.*` sont lus dans le **template XML**
+(`<Config Type="Label" Target="rolling.probe">…</Config>`) — source de vérité de
+ce qui va être appliqué, et disponible avant de toucher au container. La
+présence d'un `HEALTHCHECK` est lue sur le nouveau container (`State.Health`).
+Les valeurs absentes tombent sur la config globale.
 
 | Label | Valeurs | Défaut |
 |---|---|---|
+| `rolling.strategy` | `safe` · `bluegreen` (§4bis) | `safe` |
 | `rolling.probe` | `health` · `running` · `http://…`/`https://…` · `tcp://host:port` · `none` | `health` si l'image a un `HEALTHCHECK` (`State.Health` présent), sinon `running` |
 | `rolling.timeout` | secondes | `TIMEOUT` global (120) |
 | `rolling.grace` | secondes (sonde `running`) | `GRACE` global (15) |
@@ -208,13 +295,20 @@ Plus un rappel des labels disponibles.
   suppression de l'ancienne image après succès échoue tant qu'un autre container
   l'utilise ; non fatal, même comportement que le natif. Elle sera supprimée à
   l'update du dernier container qui l'utilise.
+- `<nom>.new` résiduel (bluegreen interrompu) : supprimé automatiquement au
+  prochain passage (§4bis.1). Si l'interruption a eu lieu entre les deux renames
+  (fenêtre de quelques ms), on retrouve `<nom>.rollback` sans `<nom>` : le
+  garde-fou `.rollback` s'applique (nettoyage manuel signalé).
+- Abort pendant un bluegreen : le handler de signal supprime `<nom>.new` et,
+  si l'ancien a déjà été arrêté, le redémarre.
 
 ## 9. Tests
 
 - **Auto-test local** (ponytail : un seul check exécutable) :
-  `php scripts/rolling_update --selftest` — asserts sur le parseur de labels /
-  décision de sonde (`resolveProbe(labels, hasHealth, cfg)`), aucun Docker
-  requis. Tourne sur macOS.
+  `php scripts/rolling_update --selftest` — asserts sur le parseur de labels,
+  la décision de sonde (`resolveProbe(labels, hasHealth, cfg)`) et la
+  vérification des prérequis bluegreen (`checkBlueGreen(xml, labels, …)`) sur
+  des templates fixtures, aucun Docker requis. Tourne sur macOS.
 - **Sur le serveur de test** (déploiement rsync sur le RAM disk). Aucun
   container de production n'est touché : tout passe par un container jetable.
   1. Container jetable `RollingTest` (`nginx:stable-alpine`, port host 18080)
@@ -233,6 +327,24 @@ Plus un rappel des labels disponibles.
   4. Batch : Update All avec deux containers dont un en échec → l'autre est mis à
      jour, résumé « 1 mis à jour, 1 restauré », tâche marquée erreur dans le tray.
   5. Container arrêté : Update → recréé arrêté, pas de porte.
+  6. **Blue/green, succès** : container jetable `RollingBG` (`nginx:stable-alpine`)
+     sur `frontend`, sans port, healthcheck en Extra Params, labels
+     `traefik.enable=true`, `traefik.http.routers.rollingbg.rule=Host(\`rollingbg.test\`)`,
+     `traefik.http.routers.rollingbg.entrypoints=web` (entrypoint `:80` de
+     `traefik.yaml`, publié sur le port host 8080),
+     `traefik.http.routers.rollingbg.service=rollingbg`,
+     `traefik.http.services.rollingbg.loadbalancer.server.port=80`,
+     `rolling.strategy=bluegreen`. Pas de TLS ni de DNS : test via l'entrypoint
+     HTTP (port host 8080) avec l'en-tête `Host`. Boucle de mesure depuis l'hôte
+     pendant l'update :
+     `while :; do curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: rollingbg.test' http://127.0.0.1:8080/; sleep 0.1; done`
+     → **0 code ≠ 200** attendu (contre plusieurs en mode sûr sur le même
+     container, mesuré pour comparaison).
+  7. **Blue/green, échec** : `rolling.probe=tcp://127.0.0.1:1`, `rolling.timeout=20`
+     → `RollingBG.new` supprimé, ancien jamais arrêté (0 erreur dans la boucle),
+     badge « update ready », notification `alert`.
+  8. **Blue/green, prérequis manquant** : ajouter un port host au template → la
+     modale liste le prérequis manquant et l'update se déroule en mode sûr.
 
 ## 10. Packaging et boucle de dev
 
@@ -240,7 +352,7 @@ Plus un rappel des labels disponibles.
   md5, injection version+md5 dans le `.plg` (entités XML `&version;`/`&md5;`,
   modèle folder.view).
 - `make deploy` : `rsync` de `source/…/plugins/docker.rolling.update/` vers
-  `root@<host>:/usr/local/emhttp/plugins/docker.rolling.update/` (RAM disk,
+  `test-server:/usr/local/emhttp/plugins/docker.rolling.update/` (RAM disk,
   perdu au reboot — parfait pour itérer ; recharger la page Docker suffit).
 - Installation propre : Plugins → Install Plugin → URL raw GitHub du `.plg`.
   Le `.plg` : `upgradepkg --install-new` du txz, post-install crée
@@ -261,3 +373,7 @@ Plus un rappel des labels disponibles.
   v2 : `docker restart` des dépendants après rollback, `rebuild_container` après
   succès.
 - Vérification sur Unraid 7.0–7.2 (même `StartCommand.php` a priori).
+- Blue/green pour d'autres proxies (NPM, SWAG, Caddy) via swap de nom/IP sur un
+  réseau Docker custom : fragile avec nginx (résolution DNS au chargement de la
+  conf → 502 jusqu'au reload), impossible quand le proxy vise `IP:port host`.
+  Non prioritaire.
