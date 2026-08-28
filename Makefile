@@ -7,8 +7,9 @@ DM      := /usr/local/emhttp/plugins/dynamix.docker.manager/scripts
 PROBE   ?= health
 TIMEOUT ?= 120
 PORTS   ?=
-URL     ?= https://127.0.0.1:4443/
 HOSTHDR ?= rollingbg.test
+PORT    ?= 4443
+SCHEME  ?= https
 VERSION ?= $(shell date +%Y.%m.%d)
 ifeq ($(PORTS),1)
 PORTLINE := <Config Name="HTTP" Target="80" Default="18081" Mode="tcp" Description="" Type="Port" Display="always" Required="false" Mask="false">18081</Config>
@@ -32,7 +33,7 @@ testbg: ## container jetable RollingBG (frontend, Traefik, bluegreen) avec « up
 	ssh $(HOST) 'docker rm -f RollingBG RollingBG.rollback RollingBG.new >/dev/null 2>&1; docker pull -q nginx:1.27.0-alpine >/dev/null && docker tag nginx:1.27.0-alpine nginx:stable-alpine && $(DM)/rebuild_container RollingBG >/dev/null; docker start RollingBG >/dev/null && php -r '"'"'$$docroot="/usr/local/emhttp"; require "$$docroot/plugins/dynamix.docker.manager/include/DockerClient.php"; (new DockerTemplates())->getAllInfo(true);'"'"' >/dev/null; docker ps --filter name=^RollingBG$$ --format "{{.Names}} {{.Status}} {{.Image}}"'
 
 measure: ## 60 s de requêtes à 100 ms depuis l'hôte ; affiche requests= failures=
-	ssh $(HOST) 'end=$$((SECONDS+60)); ko=0; n=0; while [ $$SECONDS -lt $$end ]; do c=$$(curl -sk -o /dev/null -m 2 -w "%{http_code}" -H "Host: $(HOSTHDR)" $(URL)); n=$$((n+1)); [ "$$c" = 200 ] || ko=$$((ko+1)); sleep 0.1; done; echo "requests=$$n failures=$$ko"'
+	ssh $(HOST) 'end=$$((SECONDS+60)); ko=0; n=0; while [ $$SECONDS -lt $$end ]; do c=$$(curl -sk --resolve $(HOSTHDR):$(PORT):127.0.0.1 -o /dev/null -m 2 -w "%{http_code}" $(SCHEME)://$(HOSTHDR):$(PORT)/); n=$$((n+1)); [ "$$c" = 200 ] || ko=$$((ko+1)); sleep 0.1; done; echo "requests=$$n failures=$$ko"'
 
 testclean: ## supprime containers, templates et image de test
 	ssh $(HOST) 'docker rm -f RollingTest RollingTest.rollback RollingTest.new RollingBG RollingBG.rollback RollingBG.new >/dev/null 2>&1; rm -f $(TPL)/my-RollingTest.xml $(TPL)/my-RollingBG.xml; docker image rm nginx:1.27.0-alpine >/dev/null 2>&1; true'

@@ -11,7 +11,7 @@
   <Project/>
   <Overview>Throwaway container for docker.rolling.update blue/green tests</Overview>
   <Category>Tools:</Category>
-  <WebUI>http://rollingbg.test/</WebUI>
+  <WebUI>https://rollingbg.test/</WebUI>
   <TemplateURL/>
   <Icon/>
   <ExtraParams>--health-cmd="wget -qO- http://127.0.0.1/ || exit 1" --health-interval=5s --health-timeout=3s</ExtraParams>

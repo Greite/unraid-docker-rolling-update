@@ -321,7 +321,7 @@ function finish_ok(array $u): void {
 function update_safe(array $u): string {
   global $DockerClient;
   $GLOBALS['inflight'] = $u;
-  if ($u['wasRunning']) { stopContainer_nchan($u['name']); $GLOBALS['inflight']['stoppedOld'] = true; }
+  if ($u['wasRunning']) { $GLOBALS['inflight']['stoppedOld'] = true; stopContainer_nchan($u['name']); }   // R18 : flag posé avant le stop, un abort pendant le stop redémarre bien l'ancien
   if ($u['exists']) {
     $out = dk('rename '.escapeshellarg($u['name']).' '.escapeshellarg($u['rollback']), $rc);
     if ($rc !== 0) {
@@ -348,8 +348,15 @@ function update_safe(array $u): string {
 function rollback_bg(array $u, string $reason): void {
   global $DockerClient;
   log_err("Update of {$u['name']} rolled back: $reason");
-  if (ct_exists($u['rollback'])) dk('rename '.escapeshellarg($u['rollback']).' '.escapeshellarg($u['name']));
-  if (ct_exists($u['new']))      dk('rm -f '.escapeshellarg($u['new']));
+  if (ct_exists($u['rollback'])) {
+    $out = dk('rename '.escapeshellarg($u['rollback']).' '.escapeshellarg($u['name']), $rc);
+    if ($rc !== 0) {   // R17 : ne pas supprimer .new, c'est la seule instance saine restante
+      log_err("Could not rename {$u['rollback']} back to {$u['name']}: $out - manual intervention required ({$u['new']} is still running)");
+      notify_unraid('alert', "{$u['name']}: manual intervention required", "Rollback failed: {$u['rollback']} could not be renamed back; {$u['new']} was left running.");
+      return;
+    }
+  }
+  if (ct_exists($u['new'])) dk('rm -f '.escapeshellarg($u['new']));
   if (ct_exists($u['name'])) {
     $r = $DockerClient->startContainer($u['name']);
     if ($r !== true) log_err("Could not restart the previous container: $r - manual intervention required");
@@ -366,7 +373,10 @@ function update_bluegreen(array $u): string {
   log_line('<b>Strategy: bluegreen</b> - new instance started alongside the old one, switched by Traefik once healthy');
   if (ct_exists($u['new'])) { log_warn("Removing leftover {$u['new']}"); dk('rm -f '.escapeshellarg($u['new'])); }
   $cmd = str_replace('/docker create ', '/docker run -d ', $u['cmd']);
-  $cmd = str_replace('--name='.escapeshellarg($u['name']), '--name='.escapeshellarg($u['new']), $cmd);   // format exact de xmlToCommand
+  $needle = '--name='.escapeshellarg($u['name']);
+  $pos = strpos($cmd, $needle);
+  if ($pos === false) { log_err("Could not find $needle in the generated command"); restore_image($u['repo'], $u['oldImageID'], $u['newImageID']); unset($GLOBALS['inflight']); return 'rolled'; }
+  $cmd = substr_replace($cmd, '--name='.escapeshellarg($u['new']), $pos, strlen($needle));   // R18 : 1re occurrence seulement
   $err = null;
   if (!execCommand_nchan($cmd))            $err = 'docker run failed';
   elseif (!connect_extra($u['new'], $u))   $err = 'could not connect one or more additional networks';
@@ -380,8 +390,8 @@ function update_bluegreen(array $u): string {
     unset($GLOBALS['inflight']);
     return 'rolled';
   }
+  $GLOBALS['inflight']['stoppedOld'] = true;   // R18 : flag posé avant le stop, un abort pendant le stop redémarre bien l'ancien
   stopContainer_nchan($u['name']);         // Traefik retire l'ancienne instance sur l'événement stop
-  $GLOBALS['inflight']['stoppedOld'] = true;
   $out = dk('rename '.escapeshellarg($u['name']).' '.escapeshellarg($u['rollback']), $rc);
   if ($rc !== 0) { rollback_bg($u, "rename failed: $out"); unset($GLOBALS['inflight']); return 'rolled'; }
   $out = dk('rename '.escapeshellarg($u['new']).' '.escapeshellarg($u['name']), $rc);
