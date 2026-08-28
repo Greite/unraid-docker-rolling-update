@@ -48,6 +48,45 @@ function resolve_probe(array $labels, bool $hasHealth, array $cfg): array {
   return ['type'=>$type, 'target'=>$raw, 'timeout'=>$timeout, 'grace'=>$grace, 'warnings'=>$warnings];
 }
 
+/** Labels Traefik manquants pour qu'une seconde instance soit fusionnée dans le même service load-balancé. */
+function traefik_missing(array $labels): array {
+  $routers = [];
+  foreach ($labels as $k => $v) {
+    if (preg_match('/^traefik\.(http|tcp|udp)\.routers\.([^.]+)\.(.+)$/', $k, $m)) {
+      $key = "$m[1]/$m[2]";
+      $routers[$key] ??= ['proto'=>$m[1], 'name'=>$m[2], 'service'=>''];
+      if ($m[3] === 'service') $routers[$key]['service'] = trim($v);
+    }
+  }
+  if (!$routers) return ['No Traefik router label found (traefik.http.routers.<name>.rule=...)'];
+  $missing = [];
+  foreach ($routers as $r) {
+    if ($r['service'] === '') { $missing[] = "Add label traefik.{$r['proto']}.routers.{$r['name']}.service=<service-name>"; continue; }
+    $port = "traefik.{$r['proto']}.services.{$r['service']}.loadbalancer.server.port";
+    if (!isset($labels[$port])) $missing[] = "Add label $port=<container-port>";
+  }
+  return $missing;
+}
+
+/** Prérequis de la stratégie bluegreen. Retourne la liste de ce qui manque (vide = OK). */
+function check_bluegreen(array $info, bool $wasRunning, bool $hasHealth, ?string $networkDriver): array {
+  $m   = [];
+  $net = $info['network'];
+  if (in_array($net, ['', 'bridge', 'host', 'none'], true) || str_starts_with($net, 'container:') || $networkDriver !== 'bridge')
+    $m[] = "Network must be a user-defined bridge network (current: '".($net ?: 'bridge')."', driver: ".($networkDriver ?? 'unknown').")";
+  $extraPort = (bool)preg_match('/(^|\s)(-p|--publish)[\s=]/', $info['extra']);
+  if ($info['ports'] > 0 || $extraPort)
+    $m[] = "No host port may be published (found {$info['ports']} port mapping(s) in the template".($extraPort ? ' and -p in Extra Parameters' : '').')';
+  if ($info['myip'] !== '' || preg_match('/(^|\s)--ip6?[\s=]/', $info['extra']))
+    $m[] = 'No fixed IP allowed (Fixed IP field or --ip in Extra Parameters)';
+  if (!$hasHealth)
+    $m[] = 'A healthcheck is required (image HEALTHCHECK or --health-cmd in Extra Parameters)';
+  $m = array_merge($m, traefik_missing($info['labels']));
+  if ($info['tailscale']) $m[] = 'Tailscale must be disabled for this container';
+  if (!$wasRunning)       $m[] = 'Container is not running (nothing to overlap)';
+  return $m;
+}
+
 function rolling_selftest(): bool {
   $fails = 0; $n = 0;
   $t = function (bool $cond, string $msg) use (&$fails, &$n) { $n++; if (!$cond) { $fails++; fwrite(STDERR, "FAIL: $msg\n"); } };
@@ -106,6 +145,28 @@ XML;
   $t($p['timeout'] === 20 && $p['grace'] === 20, 'cfg grace above cfg timeout raises timeout');
   $p = resolve_probe([], false, []);
   $t($p['timeout'] === 120 && $p['grace'] === 15, 'missing cfg uses built-in defaults');
+
+  // --- traefik_missing ---
+  $t(traefik_missing([]) === ['No Traefik router label found (traefik.http.routers.<name>.rule=...)'], 'no router');
+  $t(traefik_missing(['traefik.http.routers.a.rule'=>'Host(`a`)']) === ['Add label traefik.http.routers.a.service=<service-name>'], 'router without service');
+  $t(traefik_missing(['traefik.http.routers.a.rule'=>'Host(`a`)', 'traefik.http.routers.a.service'=>'svc']) === ['Add label traefik.http.services.svc.loadbalancer.server.port=<container-port>'], 'service without port');
+  $t(traefik_missing(['traefik.http.routers.a.rule'=>'Host(`a`)', 'traefik.http.routers.a.service'=>'svc', 'traefik.http.services.svc.loadbalancer.server.port'=>'80']) === [], 'complete labels');
+  $t(count(traefik_missing(['traefik.http.routers.a.rule'=>'x', 'traefik.tcp.routers.b.rule'=>'y'])) === 2, 'two routers, two missing services');
+  // --- check_bluegreen ---
+  $ok = ['network'=>'frontend', 'myip'=>'', 'extra'=>'--health-cmd=x', 'tailscale'=>false, 'ports'=>0,
+         'labels'=>['traefik.http.routers.a.rule'=>'r', 'traefik.http.routers.a.service'=>'s', 'traefik.http.services.s.loadbalancer.server.port'=>'80']];
+  $t(check_bluegreen($ok, true, true, 'bridge') === [], 'all prerequisites met');
+  $t(count(check_bluegreen($ok, false, false, 'bridge')) === 2, 'not running + no healthcheck = 2 missing');
+  $t(count(check_bluegreen(['network'=>'bridge'] + $ok, true, true, 'bridge')) === 1, 'default bridge refused');
+  $t(count(check_bluegreen(['network'=>'br0'] + $ok, true, true, 'macvlan')) === 1, 'macvlan refused');
+  $t(count(check_bluegreen(['network'=>'container:vpn'] + $ok, true, true, null)) === 1, 'container: refused');
+  $t(count(check_bluegreen(['network'=>'ghost'] + $ok, true, true, null)) === 1, 'unknown network refused');
+  $t(count(check_bluegreen(['ports'=>2] + $ok, true, true, 'bridge')) === 1, 'template ports refused');
+  $t(count(check_bluegreen(['extra'=>'-p 80:80 --health-cmd=x'] + $ok, true, true, 'bridge')) === 1, '-p in extra refused');
+  $t(count(check_bluegreen(['myip'=>'10.0.0.5'] + $ok, true, true, 'bridge')) === 1, 'fixed ip refused');
+  $t(count(check_bluegreen(['extra'=>'--ip=10.0.0.5 --health-cmd=x'] + $ok, true, true, 'bridge')) === 1, '--ip refused');
+  $t(count(check_bluegreen(['tailscale'=>true] + $ok, true, true, 'bridge')) === 1, 'tailscale refused');
+  $t(count(check_bluegreen(['labels'=>[]] + $ok, true, true, 'bridge')) === 1, 'no traefik labels refused');
 
   echo $fails ? "selftest FAILED ($fails/$n)\n" : "selftest OK ($n checks)\n";
   return $fails === 0;
