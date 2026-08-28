@@ -44,7 +44,7 @@ function resolve_probe(array $labels, bool $hasHealth, array $cfg): array {
     $warnings[] = "rolling.probe=health but the container has no healthcheck, using 'running'";
     $type = 'running';
   }
-  if (isset($labels['rolling.grace']) && $grace > $timeout) $timeout = $grace;   // la sonde running doit pouvoir aboutir
+  if ($grace > $timeout) $timeout = $grace;   // la sonde running doit pouvoir aboutir
   return ['type'=>$type, 'target'=>$raw, 'timeout'=>$timeout, 'grace'=>$grace, 'warnings'=>$warnings];
 }
 
@@ -100,8 +100,10 @@ XML;
   $t($p['type'] === 'none', 'none');
   $p = resolve_probe(['rolling.grace'=>'200', 'rolling.timeout'=>'60'], false, $cfg);
   $t($p['timeout'] === 200 && $p['grace'] === 200, 'grace above timeout raises timeout');
-  $p = resolve_probe(['rolling.timeout'=>'abc'], false, $cfg);
-  $t($p['timeout'] === 5, 'non-numeric timeout clamps to the 5 s minimum');
+  $p = resolve_probe(['rolling.timeout'=>'abc', 'rolling.grace'=>'3'], false, $cfg);
+  $t($p['timeout'] === 5 && $p['grace'] === 3, 'non-numeric timeout clamps to the 5 s minimum');
+  $p = resolve_probe([], false, ['TIMEOUT'=>'10', 'GRACE'=>'20']);
+  $t($p['timeout'] === 20 && $p['grace'] === 20, 'cfg grace above cfg timeout raises timeout');
   $p = resolve_probe([], false, []);
   $t($p['timeout'] === 120 && $p['grace'] === 15, 'missing cfg uses built-in defaults');
 
