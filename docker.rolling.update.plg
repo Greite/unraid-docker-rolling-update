@@ -1,0 +1,47 @@
+<?xml version='1.0' standalone='yes'?>
+<!DOCTYPE PLUGIN [
+<!ENTITY name      "docker.rolling.update">
+<!ENTITY author    "greite">
+<!ENTITY github    "greite/unraid-docker-rolling-update">
+<!ENTITY version   "2026.08.28">
+<!ENTITY md5       "7da38041f2b20cf8c64468b5604228e3">
+<!ENTITY launch    "Settings/RollingUpdateSettings">
+<!ENTITY plugdir   "/usr/local/emhttp/plugins/&name;">
+<!ENTITY pluginURL "https://raw.githubusercontent.com/&github;/main/&name;.plg">
+]>
+<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="refresh" min="7.0.0" support="https://github.com/&github;/issues">
+
+<CHANGES>
+###2026.08.28
+- Initial release: sequential updates with health gate and automatic rollback (container and image), opt-in blue/green strategy for containers behind Traefik.
+</CHANGES>
+
+<FILE Name="/boot/config/plugins/&name;/&name;-&version;.txz" Run="upgradepkg --install-new">
+<URL>https://raw.githubusercontent.com/&github;/main/archive/&name;-&version;.txz</URL>
+<MD5>&md5;</MD5>
+</FILE>
+
+<FILE Run="/bin/bash">
+<INLINE>
+mkdir -p /boot/config/plugins/&name;
+[ -f /boot/config/plugins/&name;/&name;.cfg ] || cp &plugdir;/default.cfg /boot/config/plugins/&name;/&name;.cfg
+rm -f $(ls /boot/config/plugins/&name;/&name;-*.txz 2>/dev/null | grep -v '&version;')
+echo ""
+echo "-----------------------------------------------------------"
+echo " &name; has been installed. Version: &version;"
+echo " Update / Update All on the Docker page now use rolling updates."
+echo "-----------------------------------------------------------"
+echo ""
+</INLINE>
+</FILE>
+
+<FILE Run="/bin/bash" Method="remove">
+<INLINE>
+removepkg &name;-&version;
+rm -rf &plugdir;
+rm -rf /boot/config/plugins/&name;
+echo "&name; has been removed - the native Update button is back."
+</INLINE>
+</FILE>
+
+</PLUGIN>
