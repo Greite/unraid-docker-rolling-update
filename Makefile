@@ -1,4 +1,5 @@
 NAME    := docker.rolling.update
+-include local.mk   # valeurs locales non versionnées (ex. BGHOST = un vrai sous-domaine avec certificat)
 HOST    ?= unraid
 PLUGDIR := usr/local/emhttp/plugins/$(NAME)
 SRC     := source/$(NAME)/$(PLUGDIR)
@@ -7,7 +8,8 @@ DM      := /usr/local/emhttp/plugins/dynamix.docker.manager/scripts
 PROBE   ?= health
 TIMEOUT ?= 120
 PORTS   ?=
-HOSTHDR ?= rollingbg.test
+BGHOST  ?= rollingbg.test
+HOSTHDR ?= $(BGHOST)
 PORT    ?= 4443
 SCHEME  ?= https
 VERSION ?= $(shell date +%Y.%m.%d)
@@ -29,7 +31,7 @@ testct: ## container jetable RollingTest (bridge, port 18080) avec « update rea
 	ssh $(HOST) 'docker rm -f RollingTest RollingTest.rollback RollingTest.new >/dev/null 2>&1; docker pull -q nginx:1.27.0-alpine >/dev/null && docker tag nginx:1.27.0-alpine nginx:stable-alpine && $(DM)/rebuild_container RollingTest >/dev/null; docker start RollingTest >/dev/null && php -r '"'"'$$docroot="/usr/local/emhttp"; require "$$docroot/plugins/dynamix.docker.manager/include/DockerClient.php"; (new DockerTemplates())->getAllInfo(true);'"'"' >/dev/null; docker ps --filter name=^RollingTest$$ --format "{{.Names}} {{.Status}} {{.Image}}"'
 
 testbg: ## container jetable RollingBG (frontend, Traefik, bluegreen) avec « update ready » simulé
-	sed -e 's|@PROBE@|$(PROBE)|' -e 's|@TIMEOUT@|$(TIMEOUT)|' -e 's|<!--PORT-->|$(PORTLINE)|' tests/templates/my-RollingBG.xml | ssh $(HOST) 'cat > $(TPL)/my-RollingBG.xml'
+	sed -e 's|@PROBE@|$(PROBE)|' -e 's|@TIMEOUT@|$(TIMEOUT)|' -e 's|@BGHOST@|$(BGHOST)|' -e 's|<!--PORT-->|$(PORTLINE)|' tests/templates/my-RollingBG.xml | ssh $(HOST) 'cat > $(TPL)/my-RollingBG.xml'
 	ssh $(HOST) 'docker rm -f RollingBG RollingBG.rollback RollingBG.new >/dev/null 2>&1; docker pull -q nginx:1.27.0-alpine >/dev/null && docker tag nginx:1.27.0-alpine nginx:stable-alpine && $(DM)/rebuild_container RollingBG >/dev/null; docker start RollingBG >/dev/null && php -r '"'"'$$docroot="/usr/local/emhttp"; require "$$docroot/plugins/dynamix.docker.manager/include/DockerClient.php"; (new DockerTemplates())->getAllInfo(true);'"'"' >/dev/null; docker ps --filter name=^RollingBG$$ --format "{{.Names}} {{.Status}} {{.Image}}"'
 
 measure: ## 60 s de requêtes à 100 ms depuis l'hôte ; affiche requests= failures=

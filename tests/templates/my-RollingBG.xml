@@ -11,7 +11,7 @@
   <Project/>
   <Overview>Throwaway container for docker.rolling.update blue/green tests</Overview>
   <Category>Tools:</Category>
-  <WebUI>https://rollingbg.test/</WebUI>
+  <WebUI>https://@BGHOST@/</WebUI>
   <TemplateURL/>
   <Icon/>
   <ExtraParams>--health-cmd="wget -qO- http://127.0.0.1/ || exit 1" --health-interval=5s --health-timeout=3s</ExtraParams>
@@ -23,7 +23,7 @@
   <Requires/>
   <!--PORT-->
   <Config Name="traefik.enable" Target="traefik.enable" Default="true" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">true</Config>
-  <Config Name="router rule" Target="traefik.http.routers.rollingbg.rule" Default="" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">Host(`rollingbg.test`)</Config>
+  <Config Name="router rule" Target="traefik.http.routers.rollingbg.rule" Default="" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">Host(`@BGHOST@`)</Config>
   <Config Name="router entrypoints" Target="traefik.http.routers.rollingbg.entrypoints" Default="" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">websecure</Config>
   <Config Name="router tls" Target="traefik.http.routers.rollingbg.tls" Default="" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">true</Config>
   <Config Name="router certresolver" Target="traefik.http.routers.rollingbg.tls.certresolver" Default="" Mode="" Description="" Type="Label" Display="always" Required="false" Mask="false">cloudflare</Config>
