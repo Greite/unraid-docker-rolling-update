@@ -60,7 +60,8 @@ function notify_unraid(string $importance, string $subject, string $description)
   global $docroot, $var, $notify;
   $server = strtoupper(_var($var, 'NAME', 'tower'));
   $output = _var($notify, 'docker_notify');           // mêmes canaux que les notifications Docker natives
-  exec("$docroot/webGui/scripts/notify -e ".escapeshellarg('Docker Rolling Update').' -s '.escapeshellarg("Notice [$server] - $subject").' -d '.escapeshellarg($description).' -i '.escapeshellarg(trim("$importance $output"))." -l '/Docker' -x");
+  // pas de -x : un ticket unique par event avalerait toutes les notifications suivantes (le natif s'en sort car son event contient nom+version)
+  exec("$docroot/webGui/scripts/notify -e ".escapeshellarg('Docker Rolling Update').' -s '.escapeshellarg("Notice [$server] - $subject").' -d '.escapeshellarg($description).' -i '.escapeshellarg(trim("$importance $output"))." -l '/Docker'");
 }
 
 // ---------- abort / erreur fatale : remettre l'ancien container en service ----------
