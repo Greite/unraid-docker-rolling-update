@@ -1,8 +1,8 @@
 <?php
-/* docker.rolling.update - fonctions pures (aucune dépendance Unraid/Docker), testables partout.
- * `php rolling.php` lance l'auto-test. GPL-2.0. */
+/* docker.rolling.update - pure functions (no Unraid/Docker dependency), testable anywhere.
+ * `php rolling.php` runs the self-test. GPL-2.0. */
 
-/** Extrait d'un template Unraid (XML v2) ce dont le plugin a besoin. Tolère un XML invalide. */
+/** Extracts from an Unraid template (XML v2) what the plugin needs. Tolerates invalid XML. */
 function template_info(string $xml): array {
   $info = ['network'=>'', 'myip'=>'', 'extra'=>'', 'tailscale'=>false, 'ports'=>0, 'labels'=>[]];
   $x = @simplexml_load_string($xml);
@@ -15,20 +15,20 @@ function template_info(string $xml): array {
     $type = (string)$c['Type'];
     if ($type === 'Port') $info['ports']++;
     if ($type === 'Label') {
-      // même règle que xmlToCommand : valeur saisie, sinon Default
+      // same rule as xmlToCommand: entered value, otherwise Default
       $value = strlen((string)$c) ? (string)$c : (string)$c['Default'];
-      $info['labels'][html_entity_decode((string)$c['Target'], ENT_XML1, 'UTF-8')] = html_entity_decode($value, ENT_XML1, 'UTF-8');   // = xml_decode() d'Unraid
+      $info['labels'][html_entity_decode((string)$c['Target'], ENT_XML1, 'UTF-8')] = html_entity_decode($value, ENT_XML1, 'UTF-8');   // = Unraid's xml_decode()
     }
   }
   return $info;
 }
 
-/** Un `--health-cmd` dans Extra Parameters vaut HEALTHCHECK. */
+/** A `--health-cmd` in Extra Parameters counts as a HEALTHCHECK. */
 function extra_has_health(string $extra): bool {
   return str_contains($extra, '--health-cmd');
 }
 
-/** Décide de la sonde de santé à partir des labels, de la présence d'un healthcheck et de la config globale. */
+/** Decides the health probe from the labels, the presence of a healthcheck, and the global config. */
 function resolve_probe(array $labels, bool $hasHealth, array $cfg): array {
   $warnings = [];
   $timeout  = max(5, (int)($labels['rolling.timeout'] ?? $cfg['TIMEOUT'] ?? 120));
@@ -44,11 +44,11 @@ function resolve_probe(array $labels, bool $hasHealth, array $cfg): array {
     $warnings[] = "rolling.probe=health but the container has no healthcheck, using 'running'";
     $type = 'running';
   }
-  if ($grace > $timeout) $timeout = $grace;   // la sonde running doit pouvoir aboutir
+  if ($grace > $timeout) $timeout = $grace;   // the running probe must be able to complete
   return ['type'=>$type, 'target'=>$raw, 'timeout'=>$timeout, 'grace'=>$grace, 'warnings'=>$warnings];
 }
 
-/** Labels Traefik manquants pour qu'une seconde instance soit fusionnée dans le même service load-balancé. */
+/** Missing Traefik labels for a second instance to be merged into the same load-balanced service. */
 function traefik_missing(array $labels): array {
   $routers = [];
   foreach ($labels as $k => $v) {
@@ -68,7 +68,7 @@ function traefik_missing(array $labels): array {
   return $missing;
 }
 
-/** Prérequis de la stratégie bluegreen. Retourne la liste de ce qui manque (vide = OK). */
+/** Prerequisites for the bluegreen strategy. Returns the list of what is missing (empty = OK). */
 function check_bluegreen(array $info, bool $wasRunning, bool $hasHealth, ?string $networkDriver): array {
   $m   = [];
   $net = $info['network'];

@@ -24,7 +24,7 @@
 - The native `*_nchan` helpers in `rolling_update` are verbatim GPL copies of Unraid's `update_container`: keep them verbatim
 
 ## Conventions
-- UI/log strings in English, code comments in French
+- UI/log strings, code comments and commit messages all in English
 - Per-container settings are labels (`rolling.strategy|probe|timeout|grace`), not new UI
 - Gitflow: work on `feature/*` from `develop`, releases to `main` with a signed `vYYYY.MM.DD` tag; commit messages in English (conventional commits)
 - Never commit or mention in commits: the test server name, personal domains, real hosts (use `local.mk`); never pass `-c user.email` - the repo's git profile signs commits
