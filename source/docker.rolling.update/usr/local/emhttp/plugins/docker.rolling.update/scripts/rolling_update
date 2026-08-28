@@ -41,7 +41,7 @@ function log_err(string $txt): void   { log_line("<span class='error'><b>Error:<
 
 // ---------- petits helpers Docker ----------
 function dk(string $args, ?int &$rc = null): string { exec("docker $args 2>&1", $out, $rc); return trim(implode("\n", $out)); }
-function ct_exists(string $name): bool { global $DockerClient; return !empty($DockerClient->getContainerDetails($name)); }
+function ct_exists(string $name): bool { global $DockerClient; $d = $DockerClient->getContainerDetails($name); return !empty($d['Id']); }
 function image_has_health(string $imageID): bool {
   if ($imageID === '') return false;
   $j = json_decode(dk("image inspect -f '{{json .Config.Healthcheck}}' ".escapeshellarg($imageID)), true);
@@ -189,7 +189,7 @@ function update_one(string $name): string {
     return 'skipped';
   }
   $old = $DockerClient->getContainerDetails($Name);
-  $u['exists']     = !empty($old);
+  $u['exists']     = !empty($old['Id']);
   $u['wasRunning'] = !empty($old['State']['Running']);
   $u['oldImageID'] = $DockerClient->getImageID($Repository) ?: '';
   if (!pullImage_nchan($Name, $Repository)) return 'skipped';   // rien n'a été touché
