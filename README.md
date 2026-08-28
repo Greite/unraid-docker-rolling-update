@@ -29,7 +29,7 @@ explicit `traefik.http.routers.<r>.service=<s>` and `traefik.http.services.<s>.l
 Tailscale disabled — and an application that tolerates two instances on the same data (no SQLite, no
 migrations at startup). Missing prerequisite → safe mode, with the list of what to fix in the update log.
 
-Measured on a throwaway nginx (requests every 100 ms during the update): safe mode failures=54/563. Blue/green: the switch is verified through container states and Traefik's health filtering; an end-to-end request measurement on the author's server was not possible (TLS sniStrict without a certificate for the test hostname).
+Measured on a throwaway nginx behind Traefik (HTTPS, requests every 100 ms during the update): safe mode 54 failures / 563 requests (the stop → start window); blue/green 2 / 533 and 2 / 527 over two runs (one 502 and one connection reset at the instant the old instance is stopped — in-flight requests, the documented residual); blue/green rollback 1 / 425 (the old instance is never stopped).
 
 ## Development
 
