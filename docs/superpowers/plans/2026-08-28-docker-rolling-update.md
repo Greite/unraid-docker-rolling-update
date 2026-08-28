@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Cible Unraid **7.3.2** (serveur de test, alias SSH `root@<server-ip>`) ; `.plg` avec `min="7.0.0"`.
+- Cible Unraid **7.3.2** (serveur de test, alias SSH `root@<server-ip>`) ; `.plg` avec `min="7.3.0"`.
 - Nom du plugin : `docker.rolling.update`. Fichiers déployés sous `/usr/local/emhttp/plugins/docker.rolling.update/` (RAM disk, perdu au reboot — boucle de dev via `make deploy`).
 - Config : `/boot/config/plugins/docker.rolling.update/docker.rolling.update.cfg` avec `TIMEOUT="120"`, `GRACE="15"`, `NOTIFY="yes"` ; défauts dans `default.cfg` du plugin (`parse_plugin_cfg('docker.rolling.update')` fusionne les deux).
 - Labels par container : `rolling.strategy` (`safe`|`bluegreen`, défaut `safe`), `rolling.probe` (`health`|`running`|`http://…`|`tcp://host:port`|`none`), `rolling.timeout` (s), `rolling.grace` (s).
@@ -1338,7 +1338,7 @@ Expected : `GNU GENERAL PUBLIC LICENSE / Version 2, June 1991`.
 <!ENTITY plugdir   "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/&github;/main/&name;.plg">
 ]>
-<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="refresh" min="7.0.0" support="https://github.com/&github;/issues">
+<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="refresh" min="7.3.0" support="https://github.com/&github;/issues">
 
 <CHANGES>
 ###2026.08.28

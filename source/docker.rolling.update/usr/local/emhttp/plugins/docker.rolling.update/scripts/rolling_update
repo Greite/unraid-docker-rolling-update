@@ -332,6 +332,7 @@ function update_safe(array $u): string {
       if ($u['wasRunning']) $DockerClient->startContainer($u['name']);
       restore_image($u['repo'], $u['oldImageID'], $u['newImageID']);   // R21
       notify_unraid('alert', "{$u['name']}: update rolled back", "rename failed: $out");
+      unset($GLOBALS['inflight']);
       return 'rolled';
     }
     log_info("Previous container kept as {$u['rollback']} until the new one is verified");
