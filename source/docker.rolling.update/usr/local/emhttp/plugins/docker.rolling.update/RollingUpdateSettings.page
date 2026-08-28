@@ -1,0 +1,41 @@
+Menu="Utilities"
+Title="Docker Rolling Update"
+Icon="refresh"
+---
+<?
+$cfg = parse_plugin_cfg('docker.rolling.update');
+?>
+<form markdown="1" method="POST" action="/update.php" target="progressFrame">
+<input type="hidden" name="#file" value="docker.rolling.update/docker.rolling.update.cfg">
+
+_(Health gate timeout)_ (seconds):
+: <input type="number" name="TIMEOUT" min="5" max="3600" value="<?=htmlspecialchars($cfg['TIMEOUT'] ?? '120')?>">
+
+> Maximum time to wait for the new container to become healthy before rolling back. Per-container override: label `rolling.timeout`.
+
+_(Grace period)_ (seconds):
+: <input type="number" name="GRACE" min="1" max="3600" value="<?=htmlspecialchars($cfg['GRACE'] ?? '15')?>">
+
+> For containers without a healthcheck: how long the new container must stay up without restarting. Per-container override: label `rolling.grace`.
+
+_(Notify on successful update)_:
+: <select name="NOTIFY"><?=mk_option($cfg['NOTIFY'] ?? 'yes', 'yes', _('Yes'))?><?=mk_option($cfg['NOTIFY'] ?? 'yes', 'no', _('No'))?></select>
+
+> Rollbacks always send an alert notification.
+
+&nbsp;
+: <input type="submit" value="_(Apply)_"><input type="button" value="_(Done)_" onclick="done()">
+</form>
+
+### Per-container labels
+
+Edit the container → *Add another Path, Port, Variable, Label or Device* → **Label**.
+
+| Label | Values | Default |
+|---|---|---|
+| `rolling.strategy` | `safe`, `bluegreen` | `safe` |
+| `rolling.probe` | `health`, `running`, `http://host:port/path`, `tcp://host:port`, `none` | `health` if the image has a HEALTHCHECK (or `--health-cmd` in Extra Parameters), otherwise `running` |
+| `rolling.timeout` | seconds | global setting |
+| `rolling.grace` | seconds | global setting |
+
+**`bluegreen`** (zero-downtime, Traefik Docker provider only) requires: a user-defined bridge network, no host port mapping, no fixed IP, a healthcheck, Traefik labels with an explicit `traefik.http.routers.<r>.service=<s>` and `traefik.http.services.<s>.loadbalancer.server.port=<port>`, Tailscale disabled — and an application that tolerates two instances running on the same data. When a prerequisite is missing the update falls back to safe mode and lists what is missing.
