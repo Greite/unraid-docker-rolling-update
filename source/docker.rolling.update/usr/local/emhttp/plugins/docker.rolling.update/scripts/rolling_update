@@ -67,6 +67,9 @@ function notify_unraid(string $importance, string $subject, string $description)
 // ---------- abort / erreur fatale : remettre l'ancien container en service ----------
 $inflight = null;   // contexte $u du container en cours, posé par update_safe / update_bluegreen, retiré au point de non-retour
 function abort_handler(): void {
+  static $running = false;               // R13 : un 2e signal pendant la restauration ne doit pas interrompre la 1re
+  if ($running) return;
+  $running = true;
   global $DockerClient;
   $u = $GLOBALS['inflight'] ?? null;
   if ($u) {
