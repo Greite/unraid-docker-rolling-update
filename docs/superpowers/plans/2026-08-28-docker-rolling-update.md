@@ -211,7 +211,7 @@ function template_info(string $xml): array {
     if ($type === 'Label') {
       // même règle que xmlToCommand : valeur saisie, sinon Default
       $value = strlen((string)$c) ? (string)$c : (string)$c['Default'];
-      $info['labels'][html_entity_decode((string)$c['Target'], ENT_QUOTES)] = html_entity_decode($value, ENT_QUOTES);
+      $info['labels'][html_entity_decode((string)$c['Target'], ENT_XML1, 'UTF-8')] = html_entity_decode($value, ENT_XML1, 'UTF-8');   // = xml_decode() d'Unraid
     }
   }
   return $info;
