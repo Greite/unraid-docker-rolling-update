@@ -63,6 +63,28 @@ function notify_unraid(string $importance, string $subject, string $description)
   exec("$docroot/webGui/scripts/notify -e ".escapeshellarg('Docker Rolling Update').' -s '.escapeshellarg("Notice [$server] - $subject").' -d '.escapeshellarg($description).' -i '.escapeshellarg(trim("$importance $output"))." -l '/Docker' -x");
 }
 
+// ---------- abort / erreur fatale : remettre l'ancien container en service ----------
+$inflight = null;   // contexte $u du container en cours, posé par update_safe / update_bluegreen, retiré au point de non-retour
+function abort_handler(): void {
+  global $DockerClient;
+  $u = $GLOBALS['inflight'] ?? null;
+  if ($u) {
+    unset($GLOBALS['inflight']);
+    log_err("Operation interrupted - restoring {$u['name']}");
+    if (ct_exists($u['new'])) dk('rm -f '.escapeshellarg($u['new']));
+    if (ct_exists($u['rollback'])) rollback_safe($u, 'operation interrupted');
+    elseif (!empty($u['stoppedOld']) && ct_exists($u['name'])) $DockerClient->startContainer($u['name']);
+  }
+  write('_DONE_', '');
+  exit(130);
+}
+pcntl_async_signals(true);
+foreach ([SIGTERM, SIGHUP, SIGINT] as $sig) pcntl_signal($sig, 'abort_handler');
+register_shutdown_function(function () {
+  $e = error_get_last();
+  if ($e && in_array($e['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR], true) && !empty($GLOBALS['inflight'])) abort_handler();
+});
+
 // ---------- helpers natifs (copie de dynamix.docker.manager/scripts/update_container) ----------
 function stopContainer_nchan($name) {
   global $DockerClient;
