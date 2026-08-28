@@ -38,4 +38,4 @@ Edit the container → *Add another Path, Port, Variable, Label or Device* → *
 | `rolling.timeout` | seconds | global setting |
 | `rolling.grace` | seconds | global setting |
 
-**`bluegreen`** (zero-downtime, Traefik Docker provider only) requires: a user-defined bridge network, no host port mapping, no fixed IP, a healthcheck, Traefik labels with an explicit `traefik.http.routers.<r>.service=<s>` and `traefik.http.services.<s>.loadbalancer.server.port=<port>`, Tailscale disabled — and an application that tolerates two instances running on the same data. When a prerequisite is missing the update falls back to safe mode and lists what is missing.
+**`bluegreen`** (zero-downtime, Traefik Docker provider only) requires: a user-defined bridge network, no host port mapping, no fixed IP, a healthcheck, Traefik labels with an explicit `traefik.http.routers.<r>.service=<s>` and `traefik.http.services.<s>.loadbalancer.server.port=<port>`, Tailscale disabled - and an application that tolerates two instances running on the same data. When a prerequisite is missing the update falls back to safe mode and lists what is missing.

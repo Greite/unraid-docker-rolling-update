@@ -1,6 +1,6 @@
 #!/usr/bin/php -q
 <?php
-/* docker.rolling.update — mise à jour séquentielle avec porte de santé et rollback automatique.
+/* docker.rolling.update - mise à jour séquentielle avec porte de santé et rollback automatique.
  * Appelé par openDocker('rolling_update nom1*nom2') ; sortie streamée dans la modale native (canal nchan 'docker').
  * GPL-2.0. Réutilise des portions de dynamix.docker.manager (Copyright Lime Technology / Bergware International). */
 

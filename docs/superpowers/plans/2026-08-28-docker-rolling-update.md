@@ -1,4 +1,4 @@
-# Docker Rolling Update — Plan d'implémentation
+# Docker Rolling Update - Plan d'implémentation
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Cible Unraid **7.3.2** (serveur de test, alias SSH `root@<server-ip>`) ; `.plg` avec `min="7.3.0"`.
-- Nom du plugin : `docker.rolling.update`. Fichiers déployés sous `/usr/local/emhttp/plugins/docker.rolling.update/` (RAM disk, perdu au reboot — boucle de dev via `make deploy`).
+- Nom du plugin : `docker.rolling.update`. Fichiers déployés sous `/usr/local/emhttp/plugins/docker.rolling.update/` (RAM disk, perdu au reboot - boucle de dev via `make deploy`).
 - Config : `/boot/config/plugins/docker.rolling.update/docker.rolling.update.cfg` avec `TIMEOUT="120"`, `GRACE="15"`, `NOTIFY="yes"` ; défauts dans `default.cfg` du plugin (`parse_plugin_cfg('docker.rolling.update')` fusionne les deux).
 - Labels par container : `rolling.strategy` (`safe`|`bluegreen`, défaut `safe`), `rolling.probe` (`health`|`running`|`http://…`|`tcp://host:port`|`none`), `rolling.timeout` (s), `rolling.grace` (s).
 - Noms temporaires : `<nom>.rollback` (ancien container, précieux) et `<nom>.new` (nouvelle instance bluegreen, jetable).
@@ -134,7 +134,7 @@ git commit -m "chore: squelette du plugin et boucle de déploiement vers test-se
 
 ---
 
-### Task 2 : `include/rolling.php` — lecture du template
+### Task 2 : `include/rolling.php` - lecture du template
 
 **Files:**
 - Create: `source/docker.rolling.update/usr/local/emhttp/plugins/docker.rolling.update/include/rolling.php`
@@ -146,7 +146,7 @@ git commit -m "chore: squelette du plugin et boucle de déploiement vers test-se
 
 ```php
 <?php
-/* docker.rolling.update — fonctions pures (aucune dépendance Unraid/Docker), testables partout.
+/* docker.rolling.update - fonctions pures (aucune dépendance Unraid/Docker), testables partout.
  * `php rolling.php` lance l'auto-test. GPL-2.0. */
 
 function rolling_selftest(): bool {
@@ -232,12 +232,12 @@ Expected : `selftest OK (10 checks)`.
 
 ```bash
 git add source/
-git commit -m "feat: template_info — lecture réseau/ports/labels du template Unraid"
+git commit -m "feat: template_info - lecture réseau/ports/labels du template Unraid"
 ```
 
 ---
 
-### Task 3 : `resolve_probe` — décision de la sonde
+### Task 3 : `resolve_probe` - décision de la sonde
 
 **Files:**
 - Modify: `source/docker.rolling.update/usr/local/emhttp/plugins/docker.rolling.update/include/rolling.php`
@@ -312,18 +312,18 @@ Expected : `selftest OK (21 checks)`.
 
 - [ ] **Step 5 : Aligner le spec (la présence du healthcheck est lue sur l'image + ExtraParams, pas sur `State.Health`)**
 
-Dans le spec, remplacer la phrase « La présence d'un `HEALTHCHECK` est lue sur le nouveau container (`State.Health`). » par « La présence d'un `HEALTHCHECK` est lue après le pull sur l'image (`Config.Healthcheck`, `Test[0] ≠ NONE`) ou via `--health-cmd` dans `ExtraParams` — connue avant de toucher au container. » et, dans le tableau, « `health` si l'image a un `HEALTHCHECK` (`State.Health` présent) » par « `health` si l'image a un `HEALTHCHECK` (ou `--health-cmd`) ».
+Dans le spec, remplacer la phrase « La présence d'un `HEALTHCHECK` est lue sur le nouveau container (`State.Health`). » par « La présence d'un `HEALTHCHECK` est lue après le pull sur l'image (`Config.Healthcheck`, `Test[0] ≠ NONE`) ou via `--health-cmd` dans `ExtraParams` - connue avant de toucher au container. » et, dans le tableau, « `health` si l'image a un `HEALTHCHECK` (`State.Health` présent) » par « `health` si l'image a un `HEALTHCHECK` (ou `--health-cmd`) ».
 
 - [ ] **Step 6 : Commit**
 
 ```bash
 git add source/ docs/
-git commit -m "feat: resolve_probe — choix de la sonde depuis les labels et la config"
+git commit -m "feat: resolve_probe - choix de la sonde depuis les labels et la config"
 ```
 
 ---
 
-### Task 4 : `traefik_missing` et `check_bluegreen` — prérequis blue/green
+### Task 4 : `traefik_missing` et `check_bluegreen` - prérequis blue/green
 
 **Files:**
 - Modify: `source/docker.rolling.update/usr/local/emhttp/plugins/docker.rolling.update/include/rolling.php`
@@ -415,12 +415,12 @@ Expected : `selftest OK (38 checks)`.
 
 ```bash
 git add source/
-git commit -m "feat: check_bluegreen — vérification des prérequis Traefik/réseau/ports/healthcheck"
+git commit -m "feat: check_bluegreen - vérification des prérequis Traefik/réseau/ports/healthcheck"
 ```
 
 ---
 
-### Task 5 : `scripts/rolling_update` — squelette CLI, sortie nchan, pull, dry-run
+### Task 5 : `scripts/rolling_update` - squelette CLI, sortie nchan, pull, dry-run
 
 **Files:**
 - Create: `source/docker.rolling.update/usr/local/emhttp/plugins/docker.rolling.update/scripts/rolling_update` (exécutable)
@@ -472,7 +472,7 @@ Expected : `RollingTest Up … (healthy) nginx:stable-alpine` puis `"status":"fa
 ```php
 #!/usr/bin/php -q
 <?php
-/* docker.rolling.update — mise à jour séquentielle avec porte de santé et rollback automatique.
+/* docker.rolling.update - mise à jour séquentielle avec porte de santé et rollback automatique.
  * Appelé par openDocker('rolling_update nom1*nom2') ; sortie streamée dans la modale native (canal nchan 'docker').
  * GPL-2.0. Réutilise des portions de dynamix.docker.manager (Copyright Lime Technology / Bergware International). */
 
@@ -710,12 +710,12 @@ Expected : la modale native s'ouvre, affiche le pull puis `DRY RUN…`, se termi
 
 ```bash
 git add source/ tests/
-git commit -m "feat: rolling_update — squelette CLI, sortie nchan, pull et dry-run"
+git commit -m "feat: rolling_update - squelette CLI, sortie nchan, pull et dry-run"
 ```
 
 ---
 
-### Task 6 : Mode sûr — recréation par `rename` (sans porte de santé)
+### Task 6 : Mode sûr - recréation par `rename` (sans porte de santé)
 
 **Files:**
 - Modify: `source/docker.rolling.update/usr/local/emhttp/plugins/docker.rolling.update/scripts/rolling_update`
@@ -812,7 +812,7 @@ Expected : la commande contient `docker create` (pas `run -d`), `RollingTest upd
 
 ```bash
 git add source/
-git commit -m "feat: mode sûr — recréation par rename, l'ancien container survit jusqu'à validation"
+git commit -m "feat: mode sûr - recréation par rename, l'ancien container survit jusqu'à validation"
 ```
 
 ---
@@ -1064,7 +1064,7 @@ Expected : le dialogue de confirmation affiche la ligne « Rolling update: healt
 - [ ] **Step 3 : Tester Update All**
 
 Run : `make testct` puis, dans l'UI, bouton « Update All ».
-Expected : titre de modale `Updating all Containers (1)` (seul RollingTest a un update), même déroulé. Si d'autres containers de production ont un update disponible, **ne pas cliquer Update All** : tester à la place via la console `updateAll` n'est pas nécessaire — vérifier seulement que `updateAll.toString()` dans la console contient `rolling_update`.
+Expected : titre de modale `Updating all Containers (1)` (seul RollingTest a un update), même déroulé. Si d'autres containers de production ont un update disponible, **ne pas cliquer Update All** : tester à la place via la console `updateAll` n'est pas nécessaire - vérifier seulement que `updateAll.toString()` dans la console contient `rolling_update`.
 
 - [ ] **Step 4 : Vérifier la neutralité sur les autres actions**
 
@@ -1075,7 +1075,7 @@ Expected : aucune erreur console (F12), comportement natif.
 
 ```bash
 git add source/
-git commit -m "feat: page Docker — Update et Update All passent par rolling_update"
+git commit -m "feat: page Docker - Update et Update All passent par rolling_update"
 ```
 
 ---
@@ -1132,7 +1132,7 @@ Edit the container → *Add another Path, Port, Variable, Label or Device* → *
 | `rolling.timeout` | seconds | global setting |
 | `rolling.grace` | seconds | global setting |
 
-**`bluegreen`** (zero-downtime, Traefik Docker provider only) requires: a user-defined bridge network, no host port mapping, no fixed IP, a healthcheck, Traefik labels with an explicit `traefik.http.routers.<r>.service=<s>` and `traefik.http.services.<s>.loadbalancer.server.port=<port>`, Tailscale disabled — and an application that tolerates two instances running on the same data. When a prerequisite is missing the update falls back to safe mode and lists what is missing.
+**`bluegreen`** (zero-downtime, Traefik Docker provider only) requires: a user-defined bridge network, no host port mapping, no fixed IP, a healthcheck, Traefik labels with an explicit `traefik.http.routers.<r>.service=<s>` and `traefik.http.services.<s>.loadbalancer.server.port=<port>`, Tailscale disabled - and an application that tolerates two instances running on the same data. When a prerequisite is missing the update falls back to safe mode and lists what is missing.
 ```
 
 - [ ] **Step 2 : Déployer et tester**
@@ -1204,7 +1204,7 @@ git commit -m "feat: page Settings (timeout, grace, notify) et aide sur les labe
 </Container>
 ```
 
-- [ ] **Step 2 : Créer le container et vérifier le routage Traefik (entrypoint `web` = port host 8080, sans redirection HTTPS — vérifié dans `traefik.yaml`)**
+- [ ] **Step 2 : Créer le container et vérifier le routage Traefik (entrypoint `web` = port host 8080, sans redirection HTTPS - vérifié dans `traefik.yaml`)**
 
 Run : `make testbg && ssh test-server 'sleep 3; curl -s -o /dev/null -w "%{http_code}\n" -H "Host: rollingbg.test" http://127.0.0.1:8080/'`
 Expected : `RollingBG Up … (healthy)` puis `200`.
@@ -1302,7 +1302,7 @@ Run : `make testclean`
 
 ```bash
 git add source/ tests/
-git commit -m "feat: stratégie bluegreen — nouvelle instance à côté, bascule Traefik, rollback sans coupure"
+git commit -m "feat: stratégie bluegreen - nouvelle instance à côté, bascule Traefik, rollback sans coupure"
 ```
 
 ---
@@ -1379,14 +1379,14 @@ echo "&name; has been removed - the native Update button is back."
 - [ ] **Step 3 : README.md**
 
 ```markdown
-# docker.rolling.update — Unraid plugin
+# docker.rolling.update - Unraid plugin
 
 Makes the Docker page's **Update** / **Update All** safe: containers are updated one at a time, the new
 version must pass a **health gate** (Docker HEALTHCHECK or a fallback probe), and on failure the previous
 container **and its image** are restored automatically, with an Unraid alert explaining why.
 
 Opt-in **blue/green** strategy for containers behind Traefik (Docker provider): the new instance starts
-next to the old one, Traefik switches once it is healthy — zero downtime.
+next to the old one, Traefik switches once it is healthy - zero downtime.
 
 ## Install
 
@@ -1407,7 +1407,7 @@ Uninstalling restores the native Update button.
 
 User-defined bridge network, no host port mapping, no fixed IP, a healthcheck, Traefik labels with an
 explicit `traefik.http.routers.<r>.service=<s>` and `traefik.http.services.<s>.loadbalancer.server.port`,
-Tailscale disabled — and an application that tolerates two instances on the same data (no SQLite, no
+Tailscale disabled - and an application that tolerates two instances on the same data (no SQLite, no
 migrations at startup). Missing prerequisite → safe mode, with the list of what to fix in the update log.
 
 Measured on a throwaway nginx (requests every 100 ms during the update): safe mode `failures=N`, blue/green `failures=0`.
@@ -1458,4 +1458,4 @@ Run : `make testclean`
 
 - **Couverture du spec** : §4 flux mode sûr → tâches 5-7 ; §4bis bluegreen (prérequis, flux, migration listée dans le message de repli et le README) → tâches 4, 11 ; §5 porte de santé → tâches 3, 7 ; §6 rollback (ordre re-tag → suppression, badge) → tâche 7 ; §7 UI → tâches 9, 10 ; §8 cas limites (`.rollback` résiduel → tâche 5, `.new` résiduel → tâche 11, abort → tâche 8, image partagée → `restore_image`/`finish_ok` best-effort, container arrêté → tâche 6 étape 5) ; §9 tests → étapes de test de chaque tâche + `make measure` ; §10 packaging → tâches 1, 12.
 - **Types** : `wait_healthy(): ?string` (null = OK) utilisé tel quel dans `update_safe` et `update_bluegreen` ; `check_bluegreen()` retourne `string[]` ; `$u` a les mêmes clés partout (`name, rollback, new, repo, cmd, xml, info, exists, wasRunning, oldImageID, newImageID, probe, stoppedOld`).
-- **Point d'attention** : `update_container` natif appelle `removeContainer($Name)` qui purge aussi `webui-info.json` pour ce nom ; avec le `rename`, l'entrée reste et sert au nouveau container du même nom — comportement voulu.
+- **Point d'attention** : `update_container` natif appelle `removeContainer($Name)` qui purge aussi `webui-info.json` pour ce nom ; avec le `rename`, l'entrée reste et sert au nouveau container du même nom - comportement voulu.

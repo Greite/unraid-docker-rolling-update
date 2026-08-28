@@ -1,5 +1,5 @@
 <?php
-/* docker.rolling.update — fonctions pures (aucune dépendance Unraid/Docker), testables partout.
+/* docker.rolling.update - fonctions pures (aucune dépendance Unraid/Docker), testables partout.
  * `php rolling.php` lance l'auto-test. GPL-2.0. */
 
 /** Extrait d'un template Unraid (XML v2) ce dont le plugin a besoin. Tolère un XML invalide. */

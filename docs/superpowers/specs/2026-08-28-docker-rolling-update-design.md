@@ -1,8 +1,8 @@
-# Docker Rolling Update pour Unraid — Design
+# Docker Rolling Update pour Unraid - Design
 
 Date : 2026-08-28
 Cible : Unraid 7.3.2 (serveur de test, vérifié) ; compatible avec la branche
-`master` du webgui (futur tray de tâches `TaskQueue`) — les deux résolvent
+`master` du webgui (futur tray de tâches `TaskQueue`) - les deux résolvent
 `openDocker(cmd)` dans `plugins/*/scripts/<cmd>`.
 Plugin : `docker.rolling.update`
 
@@ -41,7 +41,7 @@ pourquoi.
 | Update → `openDocker('update_container <nom>', …)` ; Update All joint les noms par `*` | `plugins/dynamix.docker.manager/javascript/docker.js:106,181` |
 | `update_container` : pull → stop → **rm** → run → **rmi ancienne image**. Aucun health check, aucun rollback | `plugins/dynamix.docker.manager/scripts/update_container` |
 | `openDocker(cmd)` (7.3.2) : `nchan_docker.start()` puis POST `StartCommand.php {cmd,start}` → résout `cmd` dans `plugins/*/scripts/<cmd>`, lance `nohup bash -c 'sleep .3 && <script> <args>'`, renvoie le pid ; la modale suit le canal nchan `docker`, `_DONE_` termine, callback `loadlist` | `webGui/include/StartCommand.php`, `webGui/include/DefaultPageLayout/HeadInlineJS.php` (serveur) |
-| Sur `master` (post-7.3.2) le même `openDocker` passe par `TaskQueue.php` (`task_resolve`, même glob) — rien à changer | `plugins/dynamix/include/TaskQueue.php:275` |
+| Sur `master` (post-7.3.2) le même `openDocker` passe par `TaskQueue.php` (`task_resolve`, même glob) - rien à changer | `plugins/dynamix/include/TaskQueue.php:275` |
 | `update_container` 7.3.2 = master moins `connectExtraNetworks()` (helper absent en 7.3.2) | diff serveur vs master |
 | Une `.page` `Menu="Docker"` sans `Title` est évaluée dans la page Docker sans onglet | `webGui/include/DefaultPageLayout/MainContentTabbed.php:39` |
 | `docker.js` chargé en synchrone dans la page Docker → les globales `updateContainer`/`updateAll` sont redéfinissables au DOM ready | `DockerContainers.page:66` |
@@ -86,7 +86,7 @@ Pour chaque nom :
 2. **Pull** : copie du `pullImage_nchan` natif (progression par layer,
    `setUpdateStatus` sur `Digest:`). Échec → suivant (rien n'a été touché).
 3. **Stop gracieux** si `wasRunning` (`DockerClient::stopContainer`).
-4. **`docker rename <nom> <nom>.rollback`** — à la place du `rm` natif. L'ancien
+4. **`docker rename <nom> <nom>.rollback`** - à la place du `rm` natif. L'ancien
    container et son image restent intacts.
 5. **Astuce Tailscale** (miroir natif) : si `TailscaleEnabled`, `docker create`
    temporaire pour extraire Entrypoint/Cmd, injection `ORG_ENTRYPOINT`/`ORG_CMD`,
@@ -138,7 +138,7 @@ l'utilisateur. Sur test-server : Portfolio, ITTools (oui) ; WordPress/Woocommerc
 2. Pull (identique au mode sûr).
 3. **`docker run -d` du nouveau sous le nom `<nom>.new`** : commande du template
    avec `'--name='.escapeshellarg($Name)` (format exact de `xmlToCommand`,
-   `Helpers.php:400`) remplacé par `'--name='.escapeshellarg("$Name.new")` —
+   `Helpers.php:400`) remplacé par `'--name='.escapeshellarg("$Name.new")` -
    même technique de `str_replace` que le natif pour `create` → `run -d`.
    `.` est autorisé dans les noms Docker. Labels identiques →
    Traefik fusionne les deux containers dans le même service. Puis
@@ -160,7 +160,7 @@ l'utilisateur. Sur test-server : Portfolio, ITTools (oui) ; WordPress/Woocommerc
 
 Coupure résiduelle : les requêtes en vol sur l'ancienne instance au moment du
 `stop` (Traefik ne retente pas par défaut). Pendant quelques secondes les deux
-versions servent en parallèle — c'est la définition d'un rolling update.
+versions servent en parallèle - c'est la définition d'un rolling update.
 Pendant le recouvrement, la page Docker d'Unraid affiche `<nom>.new` comme
 container orphelin ; c'est transitoire.
 
@@ -177,9 +177,9 @@ container orphelin ; c'est transitoire.
 ## 5. Porte de santé
 
 Tous les labels `rolling.*` sont lus dans le **template XML**
-(`<Config Type="Label" Target="rolling.probe">…</Config>`) — source de vérité de
+(`<Config Type="Label" Target="rolling.probe">…</Config>`) - source de vérité de
 ce qui va être appliqué, et disponible avant de toucher au container. La
-présence d'un `HEALTHCHECK` est lue après le pull sur l'image (`Config.Healthcheck`, `Test[0] ≠ NONE`) ou via `--health-cmd` dans `ExtraParams` — connue avant de toucher au container.
+présence d'un `HEALTHCHECK` est lue après le pull sur l'image (`Config.Healthcheck`, `Test[0] ≠ NONE`) ou via `--health-cmd` dans `ExtraParams` - connue avant de toucher au container.
 Les valeurs absentes tombent sur la config globale.
 
 | Label | Valeurs | Défaut |
@@ -222,12 +222,12 @@ Déclenché par : échec de `docker run`/`create`, échec de la porte de santé.
    `addRoute()`.
 4. Image : `docker tag <oldImageID> <Repository>` d'abord (re-pointe le tag sur
    l'ancienne image, ne peut pas échouer), puis `removeImage(<newImageID>)` en
-   best-effort (échoue sans conséquence si un autre container l'utilise — sur
+   best-effort (échoue sans conséquence si un autre container l'utilise - sur
    test-server, WordPress et Woocommerce partagent `wordpress-redis:latest`).
    Le `RepoDigest` de l'ancienne image est conservé par Docker → après
    `DockerUpdate::reloadUpdateStatus($Repository)` le badge **« update ready »
    réapparaît**, ce qui est l'état vrai : la mise à jour existe, elle est cassée.
-5. Notification `alert` : « <nom> : mise à jour annulée — <raison> ».
+5. Notification `alert` : « <nom> : mise à jour annulée - <raison> ».
 6. Si le `docker start` de l'ancien échoue : log en rouge, notification `alert`
    « intervention manuelle requise », suivant.
 
@@ -280,7 +280,7 @@ Plus un rappel des labels disponibles.
 
 - Deux exécutions simultanées : `StartCommand.php` avec `start=0` refuse de
   relancer un script déjà en cours (`pgrep`), et `master` sérialise par type.
-- Abort (7.3.2 : `kill <pid>` — bash ≥ 5.1 exec la dernière commande du
+- Abort (7.3.2 : `kill <pid>` - bash ≥ 5.1 exec la dernière commande du
   wrapper, le signal atteint le script ; `master` : SIGTERM sur le groupe) :
   `pcntl` est disponible dans le PHP CLI d'Unraid 7.3.2
   (vérifié) → handler SIGTERM/SIGHUP + `register_shutdown_function` qui, si un
@@ -291,7 +291,7 @@ Plus un rappel des labels disponibles.
 - Container hors template (`getUserTemplate` false) : ignoré avec message natif.
 - `Repository` sans tag : `:latest` ajouté (miroir natif) avant `rmi`/`tag`.
 - Pull réussi mais image identique (`oldImageID == newImageID`) : on recrée quand
-  même (miroir natif — le bouton n'est visible que si un update est détecté).
+  même (miroir natif - le bouton n'est visible que si un update est détecté).
 - Image partagée par plusieurs containers (WordPress/Woocommerce) : la
   suppression de l'ancienne image après succès échoue tant qu'un autre container
   l'utilise ; non fatal, même comportement que le natif. Elle reste alors en
@@ -307,7 +307,7 @@ Plus un rappel des labels disponibles.
 ## 9. Tests
 
 - **Auto-test local** (ponytail : un seul check exécutable) :
-  `php scripts/rolling_update --selftest` — asserts sur le parseur de labels,
+  `php scripts/rolling_update --selftest` - asserts sur le parseur de labels,
   la décision de sonde (`resolveProbe(labels, hasHealth, cfg)`) et la
   vérification des prérequis bluegreen (`checkBlueGreen(xml, labels, …)`) sur
   des templates fixtures, aucun Docker requis. Tourne sur macOS.
@@ -355,7 +355,7 @@ Plus un rappel des labels disponibles.
   modèle folder.view).
 - `make deploy` : `rsync` de `source/…/plugins/docker.rolling.update/` vers
   `test-server:/usr/local/emhttp/plugins/docker.rolling.update/` (RAM disk,
-  perdu au reboot — parfait pour itérer ; recharger la page Docker suffit).
+  perdu au reboot - parfait pour itérer ; recharger la page Docker suffit).
 - Installation propre : Plugins → Install Plugin → URL raw GitHub du `.plg`.
   Le `.plg` : `upgradepkg --install-new` du txz, post-install crée
   `/boot/config/plugins/docker.rolling.update/` et copie `default.cfg` si absent,
@@ -367,7 +367,7 @@ Plus un rappel des labels disponibles.
   pour Docker).
 - Option « garder l'image précédente » + entrée « Rollback » dans le menu
   contextuel.
-- Dépendants `--network container:X` — **pertinent sur test-server** : 8 containers
+- Dépendants `--network container:X` - **pertinent sur test-server** : 8 containers
   (Prowlarr, Sonarr, Radarr, Bazarr, qBittorrent, Flaresolverr, Chaptarr,
   Unmonitarr) partagent le namespace réseau de `PIA-Tun`. Après un update
   réussi de X ils passent « rebuild ready » (flux natif `rebuildAll`) ; après un
