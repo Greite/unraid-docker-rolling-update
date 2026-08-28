@@ -274,6 +274,8 @@ function restore_image(string $repo, string $oldImageID, string $newImageID): vo
   // R11 : si le re-tag échoue, ne surtout pas supprimer la nouvelle image
   dk('tag '.escapeshellarg($oldImageID).' '.escapeshellarg($repo), $rc);
   if ($rc !== 0) { log_err("Could not re-tag $repo to the previous image - the new image is kept"); return; }
+  // R16 : reloadUpdateStatus() réutilise le 'local' en cache → le réinitialiser depuis l'image re-taguée
+  $DockerUpdate->setUpdateStatus($repo, $DockerUpdate->inspectLocalVersion($repo) ?? '');
   $DockerClient->removeImage($newImageID);            // échoue sans conséquence si une autre container l'utilise
   $DockerClient->flushCaches();
   $DockerUpdate->reloadUpdateStatus($repo);           // le badge « update ready » revient : l'état vrai
