@@ -179,8 +179,9 @@ function tailscale_wrap(array $u): string {
   if (!$u['info']['tailscale']) return $cmd;
   exec('docker create --name '.escapeshellarg($u['name']).' '.escapeshellarg($u['repo']).' 2>/dev/null');
   $ci  = $DockerClient->getContainerDetails($u['name']);
-  $ts  = isset($ci['Config']['Entrypoint']) ? '-e ORG_ENTRYPOINT="'.implode(' ', $ci['Config']['Entrypoint']).'" ' : '';
-  $ts .= isset($ci['Config']['Cmd'])        ? '-e ORG_CMD="'.implode(' ', $ci['Config']['Cmd']).'" ' : '';
+  // R10 : Entrypoint/Cmd viennent de l'image → escapeshellarg (le natif utilise des guillemets doubles)
+  $ts  = isset($ci['Config']['Entrypoint']) ? '-e '.escapeshellarg('ORG_ENTRYPOINT='.implode(' ', $ci['Config']['Entrypoint'])).' ' : '';
+  $ts .= isset($ci['Config']['Cmd'])        ? '-e '.escapeshellarg('ORG_CMD='.implode(' ', $ci['Config']['Cmd'])).' ' : '';
   $cmd = str_replace('-l net.unraid.docker.managed=dockerman', $ts.'-l net.unraid.docker.managed=dockerman', $cmd);
   exec('docker rm '.escapeshellarg($u['name']).' 2>/dev/null');
   return $cmd;
@@ -190,6 +191,88 @@ function connect_extra(string $ctname, array $u): bool {
   if (!function_exists('connectExtraNetworks')) return true;
   return connectExtraNetworks($ctname, getXmlVal($u['xml'], 'ExtraNetworks'), $u['info']['network']);
 }
+// ---------- porte de santé ----------
+/** Attend que $name soit sain selon $probe. Retourne null si OK, sinon la raison de l'échec. */
+function wait_healthy(string $name, array $probe): ?string {
+  global $DockerClient;
+  foreach ($probe['warnings'] as $w) log_warn($w);
+  if ($probe['type'] === 'none') { log_info('Health gate: none (rolling.probe=none)'); return null; }
+  $waitID = mt_rand();
+  $what   = $probe['type'].(in_array($probe['type'], ['http', 'tcp'], true) ? ' '.$probe['target'] : '');
+  write("<p class='logLine'></p>", "addLog\0<fieldset class='docker'><legend>Health gate: ".htmlspecialchars($what)." (timeout {$probe['timeout']}s)</legend><p class='logLine'></p><span id='wait-$waitID'>Please wait </span></fieldset>", "show_Wait\0$waitID");
+  $start = time(); $deadline = $start + $probe['timeout']; $ok = false; $reason = '';
+  while (true) {
+    $d = $DockerClient->getContainerDetails($name);
+    $state = $d['State'] ?? [];
+    if (empty($state['Running'])) { $reason = 'container exited (code '.($state['ExitCode'] ?? '?').')'; break; }
+    switch ($probe['type']) {
+      case 'health':
+        $h = $state['Health']['Status'] ?? null;
+        if ($h === 'healthy')   $ok = true;
+        if ($h === 'unhealthy') $reason = 'healthcheck reported unhealthy';
+        break;
+      case 'running':
+        if (time() - $start >= $probe['grace']) {
+          if ((int)($d['RestartCount'] ?? 0) === 0) $ok = true; else $reason = 'container restarted during the grace period';
+        }
+        break;
+      case 'http':
+        exec('curl -sf -o /dev/null --max-time 3 '.escapeshellarg($probe['target']).' 2>/dev/null', $o, $rc);
+        $ok = ($rc === 0);
+        break;
+      case 'tcp':
+        [$h, $p] = explode(':', substr($probe['target'], 6), 2);
+        if ($fp = @fsockopen($h, (int)$p, $errno, $errstr, 3)) { fclose($fp); $ok = true; }
+        break;
+    }
+    if ($ok || $reason !== '') break;
+    if (time() >= $deadline) { $reason = "timeout after {$probe['timeout']}s (state: ".($state['Health']['Status'] ?? $state['Status'] ?? '?').')'; break; }
+    sleep(2);
+  }
+  write("stop_Wait\0$waitID");
+  if ($ok) { log_line('<b>Healthy after '.(time() - $start).'s</b>'); return null; }
+  log_err("Health gate failed: $reason");
+  return $reason;
+}
+
+// ---------- rollback ----------
+/** Re-pointe le tag sur l'ancienne image (ne peut pas échouer), supprime la nouvelle en best-effort, rafraîchit le badge. */
+function restore_image(string $repo, string $oldImageID, string $newImageID): void {
+  global $DockerClient, $DockerUpdate;
+  if ($oldImageID === '' || $oldImageID === $newImageID) return;
+  dk('tag '.escapeshellarg($oldImageID).' '.escapeshellarg($repo));
+  $DockerClient->removeImage($newImageID);            // échoue sans conséquence si une autre container l'utilise
+  $DockerClient->flushCaches();
+  $DockerUpdate->reloadUpdateStatus($repo);           // le badge « update ready » revient : l'état vrai
+  log_info("Image tag $repo restored to the previous image");
+}
+/** Mode sûr : supprime le nouveau container, remet l'ancien en place (nom, état, image), notifie. */
+function rollback_safe(array $u, string $reason): void {
+  global $DockerClient;
+  log_err("Update of {$u['name']} rolled back: $reason");
+  if (ct_exists($u['name'])) { container_logs($u['name']); dk('rm -f '.escapeshellarg($u['name'])); }
+  if (ct_exists($u['rollback'])) {
+    dk('rename '.escapeshellarg($u['rollback']).' '.escapeshellarg($u['name']), $rc);
+    if ($rc !== 0) {
+      log_err("Could not rename {$u['rollback']} back to {$u['name']} - manual intervention required");
+      notify_unraid('alert', "{$u['name']}: manual intervention required", "Rollback failed: {$u['rollback']} could not be renamed back to {$u['name']}.");
+      return;
+    }
+    if ($u['wasRunning']) {
+      $r = $DockerClient->startContainer($u['name']);   // startContainer appelle déjà addRoute
+      if ($r !== true) {
+        log_err("Could not restart the previous container: $r - manual intervention required");
+        notify_unraid('alert', "{$u['name']}: manual intervention required", "Previous container could not be restarted: $r");
+        return;
+      }
+      log_info("Previous container {$u['name']} restarted");
+    }
+  }
+  restore_image($u['repo'], $u['oldImageID'], $u['newImageID']);
+  $DockerClient->flushCaches();
+  notify_unraid('alert', "{$u['name']}: update rolled back", $reason);
+}
+
 /** Fin de mise à jour réussie : supprime l'ancien container, l'ancienne image, notifie. */
 function finish_ok(array $u): void {
   global $DockerClient, $cfg;
@@ -218,11 +301,8 @@ function update_safe(array $u): string {
   $err = null;
   if (!execCommand_nchan($cmd))              $err = 'docker run failed';
   elseif (!connect_extra($u['name'], $u))    $err = 'could not connect one or more additional networks';
-  elseif ($u['wasRunning'])                  addRoute($u['name']);
-  if ($err !== null) {
-    log_err("Update of {$u['name']} failed: $err. Previous container is still available as {$u['rollback']}.");   // rollback automatique en tâche 7
-    return 'rolled';
-  }
+  elseif ($u['wasRunning']) { addRoute($u['name']); $err = wait_healthy($u['name'], $u['probe']); }
+  if ($err !== null) { rollback_safe($u, $err); unset($GLOBALS['inflight']); return 'rolled'; }
   unset($GLOBALS['inflight']);
   finish_ok($u);
   return 'ok';
