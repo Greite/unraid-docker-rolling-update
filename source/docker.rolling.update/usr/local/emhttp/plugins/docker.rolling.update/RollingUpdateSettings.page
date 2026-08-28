@@ -16,7 +16,7 @@ _(Health gate timeout)_ (seconds):
 _(Grace period)_ (seconds):
 : <input type="number" name="GRACE" min="1" max="3600" value="<?=htmlspecialchars($cfg['GRACE'] ?? '15')?>">
 
-> For containers without a healthcheck: how long the new container must stay up without restarting. Per-container override: label `rolling.grace`.
+> For containers without a healthcheck: how long the new container must stay up without restarting. Per-container override: label `rolling.grace`. If grace > timeout, timeout is raised to grace.
 
 _(Notify on successful update)_:
 : <select name="NOTIFY"><?=mk_option($cfg['NOTIFY'] ?? 'yes', 'yes', _('Yes'))?><?=mk_option($cfg['NOTIFY'] ?? 'yes', 'no', _('No'))?></select>

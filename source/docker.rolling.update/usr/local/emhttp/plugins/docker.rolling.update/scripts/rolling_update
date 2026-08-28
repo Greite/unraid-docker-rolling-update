@@ -77,7 +77,11 @@ function abort_handler(): void {
     log_err("Operation interrupted - restoring {$u['name']}");
     if (ct_exists($u['new'])) dk('rm -f '.escapeshellarg($u['new']));
     if (ct_exists($u['rollback'])) rollback_safe($u, 'operation interrupted');
-    elseif (!empty($u['stoppedOld']) && ct_exists($u['name'])) $DockerClient->startContainer($u['name']);
+    else {   // R21 : pas encore de .rollback → l'ancien est intact, mais le tag d'image pointe déjà sur la nouvelle
+      if (!empty($u['stoppedOld']) && ct_exists($u['name'])) $DockerClient->startContainer($u['name']);
+      restore_image($u['repo'], $u['oldImageID'], $u['newImageID']);
+      notify_unraid('alert', "{$u['name']}: update interrupted", 'Operation aborted; previous container kept.');
+    }
   }
   write('_DONE_', '');
   exit(130);
@@ -221,7 +225,6 @@ function connect_extra(string $ctname, array $u): bool {
 /** Attend que $name soit sain selon $probe. Retourne null si OK, sinon la raison de l'échec. */
 function wait_healthy(string $name, array $probe): ?string {
   global $DockerClient;
-  foreach ($probe['warnings'] as $w) log_warn($w);
   if ($probe['type'] === 'none') { log_info('Health gate: none (rolling.probe=none)'); return null; }
   $waitID = mt_rand();
   $what   = $probe['type'].(in_array($probe['type'], ['http', 'tcp'], true) ? ' '.$probe['target'] : '');
@@ -327,6 +330,8 @@ function update_safe(array $u): string {
     if ($rc !== 0) {
       log_err("Could not rename {$u['name']} to {$u['rollback']}: $out");
       if ($u['wasRunning']) $DockerClient->startContainer($u['name']);
+      restore_image($u['repo'], $u['oldImageID'], $u['newImageID']);   // R21
+      notify_unraid('alert', "{$u['name']}: update rolled back", "rename failed: $out");
       return 'rolled';
     }
     log_info("Previous container kept as {$u['rollback']} until the new one is verified");
@@ -375,7 +380,13 @@ function update_bluegreen(array $u): string {
   $cmd = str_replace('/docker create ', '/docker run -d ', $u['cmd']);
   $needle = '--name='.escapeshellarg($u['name']);
   $pos = strpos($cmd, $needle);
-  if ($pos === false) { log_err("Could not find $needle in the generated command"); restore_image($u['repo'], $u['oldImageID'], $u['newImageID']); unset($GLOBALS['inflight']); return 'rolled'; }
+  if ($pos === false) {
+    log_err("Could not find $needle in the generated command");
+    restore_image($u['repo'], $u['oldImageID'], $u['newImageID']);
+    notify_unraid('alert', "{$u['name']}: update rolled back", 'internal error: --name not found in the generated command');
+    unset($GLOBALS['inflight']);
+    return 'rolled';
+  }
   $cmd = substr_replace($cmd, '--name='.escapeshellarg($u['new']), $pos, strlen($needle));   // R18 : 1re occurrence seulement
   $err = null;
   if (!execCommand_nchan($cmd))            $err = 'docker run failed';
@@ -429,6 +440,7 @@ function update_one(string $name): string {
   $u['newImageID'] = $DockerClient->getImageID($Repository) ?: '';
   $hasHealth  = image_has_health($u['newImageID']) || extra_has_health($info['extra']);
   $u['probe'] = resolve_probe($info['labels'], $hasHealth, $cfg);
+  foreach ($u['probe']['warnings'] as $w) log_warn($w);   // R23 : logué même si la porte n'est jamais atteinte (container stoppé avant)
   $strategy = 'safe';
   if (($info['labels']['rolling.strategy'] ?? 'safe') === 'bluegreen') {
     $missing = check_bluegreen($info, $u['wasRunning'], $hasHealth, network_driver($info['network']));

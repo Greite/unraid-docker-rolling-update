@@ -20,7 +20,7 @@ Uninstalling restores the native Update button.
 | `rolling.strategy` | `safe`, `bluegreen` | `safe` |
 | `rolling.probe` | `health`, `running`, `http://host:port/path`, `tcp://host:port`, `none` | `health` if the image has a HEALTHCHECK (or `--health-cmd` in Extra Parameters), else `running` |
 | `rolling.timeout` | seconds | Settings (120) |
-| `rolling.grace` | seconds | Settings (15) |
+| `rolling.grace` | seconds | Settings (15) (if grace > timeout, timeout is raised to grace) |
 
 ## Blue/green prerequisites
 

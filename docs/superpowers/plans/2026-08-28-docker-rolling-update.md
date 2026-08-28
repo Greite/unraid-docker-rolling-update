@@ -988,7 +988,7 @@ register_shutdown_function(function () {
 });
 ```
 
-Note : en 7.3.2 le bouton d'abort de la bannière ne tue que le wrapper bash (`kill <pid>`), pas ce script, qui va donc jusqu'au bout — pas d'état partiel. Ce handler sert pour un `kill` manuel, le futur tray de `master` (SIGTERM au groupe) et les erreurs fatales PHP.
+Note : bash ≥ 5.1 exec la dernière commande du wrapper `bash -c`, donc le bouton d'abort de la bannière (kill du pid) atteint bien ce script en 7.3.2. Ce handler sert pour un `kill` manuel, le futur tray de `master` (SIGTERM au groupe) et les erreurs fatales PHP.
 
 - [ ] **Step 2 : Tester l'interruption pendant la porte de santé**
 

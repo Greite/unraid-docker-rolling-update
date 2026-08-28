@@ -280,8 +280,9 @@ Plus un rappel des labels disponibles.
 
 - Deux exécutions simultanées : `StartCommand.php` avec `start=0` refuse de
   relancer un script déjà en cours (`pgrep`), et `master` sérialise par type.
-- Abort (7.3.2 : `kill <pid>` du wrapper bash depuis la bannière ; `master` :
-  SIGTERM sur le groupe) : `pcntl` est disponible dans le PHP CLI d'Unraid 7.3.2
+- Abort (7.3.2 : `kill <pid>` — bash ≥ 5.1 exec la dernière commande du
+  wrapper, le signal atteint le script ; `master` : SIGTERM sur le groupe) :
+  `pcntl` est disponible dans le PHP CLI d'Unraid 7.3.2
   (vérifié) → handler SIGTERM/SIGHUP + `register_shutdown_function` qui, si un
   `<nom>.rollback` existe pour le container en cours, exécute le rollback avant
   de sortir. Le garde-fou de l'étape 4.1 couvre le cas d'un `kill -9`.
@@ -293,8 +294,9 @@ Plus un rappel des labels disponibles.
   même (miroir natif — le bouton n'est visible que si un update est détecté).
 - Image partagée par plusieurs containers (WordPress/Woocommerce) : la
   suppression de l'ancienne image après succès échoue tant qu'un autre container
-  l'utilise ; non fatal, même comportement que le natif. Elle sera supprimée à
-  l'update du dernier container qui l'utilise.
+  l'utilise ; non fatal, même comportement que le natif. Elle reste alors en
+  image orpheline (`<none>`), comme avec le flux natif ; un `docker image
+  prune` la supprime.
 - `<nom>.new` résiduel (bluegreen interrompu) : supprimé automatiquement au
   prochain passage (§4bis.1). Si l'interruption a eu lieu entre les deux renames
   (fenêtre de quelques ms), on retrouve `<nom>.rollback` sans `<nom>` : le
@@ -357,7 +359,7 @@ Plus un rappel des labels disponibles.
 - Installation propre : Plugins → Install Plugin → URL raw GitHub du `.plg`.
   Le `.plg` : `upgradepkg --install-new` du txz, post-install crée
   `/boot/config/plugins/docker.rolling.update/` et copie `default.cfg` si absent,
-  `Method="remove"` supprime le tout. `min="7.0.0"`.
+  `Method="remove"` supprime le tout. `min="7.3.0"`.
 
 ## 11. Pistes v2 (hors périmètre)
 

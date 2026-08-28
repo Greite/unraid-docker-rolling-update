@@ -4,12 +4,12 @@
 <!ENTITY author    "greite">
 <!ENTITY github    "greite/unraid-docker-rolling-update">
 <!ENTITY version   "2026.08.28">
-<!ENTITY md5       "7da38041f2b20cf8c64468b5604228e3">
+<!ENTITY md5       "589357124cb1530a31d56921f3eefe76">
 <!ENTITY launch    "Settings/RollingUpdateSettings">
 <!ENTITY plugdir   "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/&github;/main/&name;.plg">
 ]>
-<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="refresh" min="7.0.0" support="https://github.com/&github;/issues">
+<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="refresh" min="7.3.0" support="https://github.com/&github;/issues">
 
 <CHANGES>
 ###2026.08.28
