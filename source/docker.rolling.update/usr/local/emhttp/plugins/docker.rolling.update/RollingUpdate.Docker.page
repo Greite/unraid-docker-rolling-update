@@ -1,0 +1,27 @@
+Menu="Docker"
+Cond="is_file('/var/run/dockerd.pid')"
+---
+<script>
+// docker.rolling.update : route les actions Update / Update All natives vers scripts/rolling_update.
+// docker.js est chargé en synchrone dans la page Docker, donc les globales existent au DOM ready.
+$(function(){
+  if (typeof openDocker !== 'function' || typeof updateContainer !== 'function') return;
+  window.updateContainer = function(container) {
+    swal({
+      title:_('Are you sure?'),
+      text:_('Update container')+': '+container+'<br><small>Rolling update: health gate + automatic rollback</small>',
+      type:'warning', html:true, showCancelButton:true, closeOnConfirm:false,
+      confirmButtonText:_('Yes, update it!'), cancelButtonText:_('Cancel')
+    }, function(){
+      openDocker('rolling_update '+encodeURIComponent(container), _('Update container')+': '+container, '', 'loadlist');
+    });
+  };
+  window.updateAll = function() {
+    $('input[type=button]').prop('disabled', true);
+    var ct = [];
+    for (var i=0, d; d=docker[i]; i++) if (d.update==1) ct.push(encodeURIComponent(d.name));
+    if (!ct.length) { loadlist(); return; }
+    openDocker('rolling_update '+ct.join('*'), _('Updating all Containers')+' ('+ct.length+')', '', 'loadlist');
+  };
+});
+</script>
