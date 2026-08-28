@@ -28,6 +28,26 @@ function extra_has_health(string $extra): bool {
   return str_contains($extra, '--health-cmd');
 }
 
+/** Décide de la sonde de santé à partir des labels, de la présence d'un healthcheck et de la config globale. */
+function resolve_probe(array $labels, bool $hasHealth, array $cfg): array {
+  $warnings = [];
+  $timeout  = max(5, (int)($labels['rolling.timeout'] ?? $cfg['TIMEOUT'] ?? 120));
+  $grace    = max(1, (int)($labels['rolling.grace']   ?? $cfg['GRACE']   ?? 15));
+  $default  = $hasHealth ? 'health' : 'running';
+  $raw      = trim($labels['rolling.probe'] ?? '');
+  if ($raw === '')                                           $type = $default;
+  elseif (in_array($raw, ['health', 'running', 'none'], true)) $type = $raw;
+  elseif (preg_match('#^https?://\S+$#', $raw))              $type = 'http';
+  elseif (preg_match('#^tcp://[^:/\s]+:\d+$#', $raw))        $type = 'tcp';
+  else { $warnings[] = "Unknown rolling.probe value '$raw', using '$default'"; $type = $default; }
+  if ($type === 'health' && !$hasHealth) {
+    $warnings[] = "rolling.probe=health but the container has no healthcheck, using 'running'";
+    $type = 'running';
+  }
+  if (isset($labels['rolling.grace']) && $grace > $timeout) $timeout = $grace;   // la sonde running doit pouvoir aboutir
+  return ['type'=>$type, 'target'=>$raw, 'timeout'=>$timeout, 'grace'=>$grace, 'warnings'=>$warnings];
+}
+
 function rolling_selftest(): bool {
   $fails = 0; $n = 0;
   $t = function (bool $cond, string $msg) use (&$fails, &$n) { $n++; if (!$cond) { $fails++; fwrite(STDERR, "FAIL: $msg\n"); } };
@@ -59,6 +79,31 @@ XML;
   $t(extra_has_health($i['extra']), 'extra has --health-cmd');
   $t(!extra_has_health('--restart=unless-stopped'), 'extra without --health-cmd');
   $t(template_info('not xml') === ['network'=>'', 'myip'=>'', 'extra'=>'', 'tailscale'=>false, 'ports'=>0, 'labels'=>[]], 'invalid xml gives defaults');
+
+  // --- resolve_probe ---
+  $cfg = ['TIMEOUT'=>'120', 'GRACE'=>'15'];
+  $p = resolve_probe([], true, $cfg);
+  $t($p['type'] === 'health' && $p['timeout'] === 120 && $p['grace'] === 15 && $p['warnings'] === [], 'default: health when image has healthcheck');
+  $p = resolve_probe([], false, $cfg);
+  $t($p['type'] === 'running', 'default: running without healthcheck');
+  $p = resolve_probe(['rolling.probe'=>'health'], false, $cfg);
+  $t($p['type'] === 'running' && count($p['warnings']) === 1, 'health requested without healthcheck falls back to running with a warning');
+  $p = resolve_probe(['rolling.probe'=>'http://10.0.0.1:8080/health', 'rolling.timeout'=>'30'], false, $cfg);
+  $t($p['type'] === 'http' && $p['target'] === 'http://10.0.0.1:8080/health' && $p['timeout'] === 30, 'http probe with label timeout');
+  $p = resolve_probe(['rolling.probe'=>'tcp://10.0.0.1:5432'], false, $cfg);
+  $t($p['type'] === 'tcp' && $p['target'] === 'tcp://10.0.0.1:5432', 'tcp probe');
+  $p = resolve_probe(['rolling.probe'=>'tcp://nohost'], false, $cfg);
+  $t($p['type'] === 'running' && count($p['warnings']) === 1, 'malformed tcp falls back with a warning');
+  $p = resolve_probe(['rolling.probe'=>'banana'], true, $cfg);
+  $t($p['type'] === 'health' && count($p['warnings']) === 1, 'unknown value falls back with a warning');
+  $p = resolve_probe(['rolling.probe'=>'none'], false, $cfg);
+  $t($p['type'] === 'none', 'none');
+  $p = resolve_probe(['rolling.grace'=>'200', 'rolling.timeout'=>'60'], false, $cfg);
+  $t($p['timeout'] === 200 && $p['grace'] === 200, 'grace above timeout raises timeout');
+  $p = resolve_probe(['rolling.timeout'=>'abc'], false, $cfg);
+  $t($p['timeout'] === 5, 'non-numeric timeout clamps to the 5 s minimum');
+  $p = resolve_probe([], false, []);
+  $t($p['timeout'] === 120 && $p['grace'] === 15, 'missing cfg uses built-in defaults');
 
   echo $fails ? "selftest FAILED ($fails/$n)\n" : "selftest OK ($n checks)\n";
   return $fails === 0;

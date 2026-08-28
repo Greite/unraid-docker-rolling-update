@@ -179,13 +179,13 @@ container orphelin ; c'est transitoire.
 Tous les labels `rolling.*` sont lus dans le **template XML**
 (`<Config Type="Label" Target="rolling.probe">…</Config>`) — source de vérité de
 ce qui va être appliqué, et disponible avant de toucher au container. La
-présence d'un `HEALTHCHECK` est lue sur le nouveau container (`State.Health`).
+présence d'un `HEALTHCHECK` est lue après le pull sur l'image (`Config.Healthcheck`, `Test[0] ≠ NONE`) ou via `--health-cmd` dans `ExtraParams` — connue avant de toucher au container.
 Les valeurs absentes tombent sur la config globale.
 
 | Label | Valeurs | Défaut |
 |---|---|---|
 | `rolling.strategy` | `safe` · `bluegreen` (§4bis) | `safe` |
-| `rolling.probe` | `health` · `running` · `http://…`/`https://…` · `tcp://host:port` · `none` | `health` si l'image a un `HEALTHCHECK` (`State.Health` présent), sinon `running` |
+| `rolling.probe` | `health` · `running` · `http://…`/`https://…` · `tcp://host:port` · `none` | `health` si l'image a un `HEALTHCHECK` (ou `--health-cmd`), sinon `running` |
 | `rolling.timeout` | secondes | `TIMEOUT` global (120) |
 | `rolling.grace` | secondes (sonde `running`) | `GRACE` global (15) |
 
