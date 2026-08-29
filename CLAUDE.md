@@ -6,7 +6,7 @@
 - `archive/*.txz` + `docker.rolling.update.plg` are build outputs and ARE committed (the .plg URL points at them on `main`)
 
 ## Commands
-- `make selftest` - 39 pure checks, local PHP, no Docker (run before every commit)
+- `make selftest` - 43 pure checks, local PHP, no Docker (run before every commit)
 - `make deploy` - rsync to the test server RAM disk; overwrites a package install (same files, fine)
 - `make build` - rebuilds the txz on the server and re-stamps the md5 in the .plg: run it and commit `archive/` + `.plg` after ANY change under `source/`
 - `make testct` / `make testbg [PROBE= TIMEOUT= PORTS=1]` - throwaway containers `RollingTest` / `RollingBG` with a simulated "update ready" (old nginx tag); never touch other containers on the test server
