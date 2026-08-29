@@ -1,17 +1,17 @@
 #!/usr/bin/php -q
 <?php
-/* docker.rolling.update - mise à jour séquentielle avec porte de santé et rollback automatique.
- * Appelé par openDocker('rolling_update nom1*nom2') ; sortie streamée dans la modale native (canal nchan 'docker').
- * GPL-2.0. Réutilise des portions de dynamix.docker.manager (Copyright Lime Technology / Bergware International). */
+/* docker.rolling.update - sequential update with health gate and automatic rollback.
+ * Called by openDocker('rolling_update name1*name2'); output streamed to the native modal (nchan channel 'docker').
+ * GPL-2.0. Reuses portions of dynamix.docker.manager (Copyright Lime Technology / Bergware International). */
 
-if (($argv[1] ?? '') === '--selftest') {           // avant tout include Unraid : tourne sur n'importe quel PHP
+if (($argv[1] ?? '') === '--selftest') {           // before any Unraid include: runs on any PHP
   require __DIR__.'/../include/rolling.php';
   exit(rolling_selftest() ? 0 : 1);
 }
 
 $docroot ??= ($_SERVER['DOCUMENT_ROOT'] ?: '/usr/local/emhttp');
 require_once "$docroot/webGui/include/Wrappers.php";
-extract(parse_plugin_cfg('dynamix', true));          // $display, $notify (méthodes de notification Docker)
+extract(parse_plugin_cfg('dynamix', true));          // $display, $notify (Docker notification methods)
 $_SERVER['REQUEST_URI'] = '';
 $login_locale = _var($display, 'locale');
 require_once "$docroot/plugins/dynamix.docker.manager/include/DockerClient.php";
@@ -23,11 +23,11 @@ $var = parse_ini_file('/var/local/emhttp/var.ini');
 $DockerClient    = new DockerClient();
 $DockerUpdate    = new DockerUpdate();
 $DockerTemplates = new DockerTemplates();
-$custom = DockerUtil::custom();                       // requis par xmlToCommand
+$custom = DockerUtil::custom();                       // required by xmlToCommand
 $subnet = DockerUtil::network($custom);
 $cpus   = DockerUtil::cpus();
 
-// ---------- sortie vers la modale (protocole natif) + stdout optionnel ----------
+// ---------- output to the modal (native protocol) + optional stdout ----------
 function write(...$messages) {
   foreach ($messages as $m) {
     publish('docker', $m, 1, false);
@@ -39,7 +39,7 @@ function log_info(string $txt): void  { log_line(htmlspecialchars($txt)); }
 function log_warn(string $txt): void  { log_line("<span class='orange-text'><b>Warning:</b> ".htmlspecialchars($txt).'</span>'); }
 function log_err(string $txt): void   { log_line("<span class='error'><b>Error:</b> ".htmlspecialchars($txt).'</span>'); }
 
-// ---------- petits helpers Docker ----------
+// ---------- small Docker helpers ----------
 function dk(string $args, ?int &$rc = null): string { exec("docker $args 2>&1", $out, $rc); return trim(implode("\n", $out)); }
 function ct_exists(string $name): bool { global $DockerClient; $d = $DockerClient->getContainerDetails($name); return !empty($d['Id']); }
 function image_has_health(string $imageID): bool {
@@ -56,18 +56,26 @@ function container_logs(string $name, int $tail = 50): void {
   $l = dk("logs --tail $tail ".escapeshellarg($name));
   if ($l !== '') log_line("<fieldset class='docker'><legend>Last $tail log lines of ".htmlspecialchars($name)."</legend><pre style='white-space:pre-wrap'>".htmlspecialchars($l).'</pre></fieldset>');
 }
+/** Drop the per-container UI cache entry (docker.json) so getAllInfo() recomputes "updated" on the next Docker page load.
+ *  The native flow gets this for free from removeContainer(); we rename instead of removing, so do it explicitly. */
+function forget_webui_info(string $name): void {
+  global $dockerManPaths;
+  $info = DockerUtil::loadJSON($dockerManPaths["webui-info"]);
+  if (isset($info[$name])) { unset($info[$name]); DockerUtil::saveJSON($dockerManPaths["webui-info"], $info); }
+}
+
 function notify_unraid(string $importance, string $subject, string $description): void {
   global $docroot, $var, $notify;
   $server = strtoupper(_var($var, 'NAME', 'tower'));
-  $output = _var($notify, 'docker_notify');           // mêmes canaux que les notifications Docker natives
-  // pas de -x : un ticket unique par event avalerait toutes les notifications suivantes (le natif s'en sort car son event contient nom+version)
+  $output = _var($notify, 'docker_notify');           // same channels as the native Docker notifications
+  // no -x: a single ticket per event would swallow all subsequent notifications (the native code gets away with it because its event contains name+version)
   exec("$docroot/webGui/scripts/notify -e ".escapeshellarg('Docker Rolling Update').' -s '.escapeshellarg("Notice [$server] - $subject").' -d '.escapeshellarg($description).' -i '.escapeshellarg(trim("$importance $output"))." -l '/Docker'");
 }
 
-// ---------- abort / erreur fatale : remettre l'ancien container en service ----------
-$inflight = null;   // contexte $u du container en cours, posé par update_safe / update_bluegreen, retiré au point de non-retour
+// ---------- abort / fatal error: put the old container back into service ----------
+$inflight = null;   // $u context of the container in progress, set by update_safe / update_bluegreen, removed at the point of no return
 function abort_handler(): void {
-  static $running = false;               // R13 : un 2e signal pendant la restauration ne doit pas interrompre la 1re
+  static $running = false;               // R13: a 2nd signal during the restore must not interrupt the 1st
   if ($running) return;
   $running = true;
   global $DockerClient;
@@ -77,11 +85,12 @@ function abort_handler(): void {
     log_err("Operation interrupted - restoring {$u['name']}");
     if (ct_exists($u['new'])) dk('rm -f '.escapeshellarg($u['new']));
     if (ct_exists($u['rollback'])) rollback_safe($u, 'operation interrupted');
-    else {   // R21 : pas encore de .rollback → l'ancien est intact, mais le tag d'image pointe déjà sur la nouvelle
+    else {   // R21: no .rollback yet -> the old one is intact, but the image tag already points to the new one
       if (!empty($u['stoppedOld']) && ct_exists($u['name'])) $DockerClient->startContainer($u['name']);
       restore_image($u['repo'], $u['oldImageID'], $u['newImageID']);
       notify_unraid('alert', "{$u['name']}: update interrupted", 'Operation aborted; previous container kept.');
     }
+    forget_webui_info($u['name']);
   }
   write('_DONE_', '');
   exit(130);
@@ -93,7 +102,7 @@ register_shutdown_function(function () {
   if ($e && in_array($e['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR], true) && !empty($GLOBALS['inflight'])) abort_handler();
 });
 
-// ---------- helpers natifs (copie de dynamix.docker.manager/scripts/update_container) ----------
+// ---------- native helpers (copy of dynamix.docker.manager/scripts/update_container) ----------
 function stopContainer_nchan($name) {
   global $DockerClient;
   $waitID = mt_rand();
@@ -201,28 +210,28 @@ function execCommand_nchan($command) {
   return $retval===0;
 }
 
-// ---------- recréation ----------
-/** Miroir de l'astuce Tailscale native : injecte ORG_ENTRYPOINT/ORG_CMD dans la commande. No-op si Tailscale est désactivé. */
+// ---------- recreation ----------
+/** Mirrors the native Tailscale trick: injects ORG_ENTRYPOINT/ORG_CMD into the command. No-op if Tailscale is disabled. */
 function tailscale_wrap(array $u): string {
   global $DockerClient;
   $cmd = $u['cmd'];
   if (!$u['info']['tailscale']) return $cmd;
   exec('docker create --name '.escapeshellarg($u['name']).' '.escapeshellarg($u['repo']).' 2>/dev/null');
   $ci  = $DockerClient->getContainerDetails($u['name']);
-  // R10 : Entrypoint/Cmd viennent de l'image → escapeshellarg (le natif utilise des guillemets doubles)
+  // R10: Entrypoint/Cmd come from the image -> escapeshellarg (the native code uses double quotes)
   $ts  = isset($ci['Config']['Entrypoint']) ? '-e '.escapeshellarg('ORG_ENTRYPOINT='.implode(' ', $ci['Config']['Entrypoint'])).' ' : '';
   $ts .= isset($ci['Config']['Cmd'])        ? '-e '.escapeshellarg('ORG_CMD='.implode(' ', $ci['Config']['Cmd'])).' ' : '';
   $cmd = str_replace('-l net.unraid.docker.managed=dockerman', $ts.'-l net.unraid.docker.managed=dockerman', $cmd);
   exec('docker rm '.escapeshellarg($u['name']).' 2>/dev/null');
   return $cmd;
 }
-/** connectExtraNetworks n'existe pas en 7.3.2 : ne rien faire dans ce cas. */
+/** connectExtraNetworks does not exist in 7.3.2: do nothing in that case. */
 function connect_extra(string $ctname, array $u): bool {
   if (!function_exists('connectExtraNetworks')) return true;
   return connectExtraNetworks($ctname, getXmlVal($u['xml'], 'ExtraNetworks'), $u['info']['network']);
 }
-// ---------- porte de santé ----------
-/** Attend que $name soit sain selon $probe. Retourne null si OK, sinon la raison de l'échec. */
+// ---------- health gate ----------
+/** Waits for $name to become healthy according to $probe. Returns null if OK, otherwise the failure reason. */
 function wait_healthy(string $name, array $probe): ?string {
   global $DockerClient;
   if ($probe['type'] === 'none') { log_info('Health gate: none (rolling.probe=none)'); return null; }
@@ -237,7 +246,7 @@ function wait_healthy(string $name, array $probe): ?string {
     switch ($probe['type']) {
       case 'health':
         if (!isset($state['Health'])) {
-          // R11 : pas d'objet Health du tout (healthcheck désactivé) -> repli sur la probe running plutôt que d'attendre le timeout
+          // R11: no Health object at all (healthcheck disabled) -> fall back to the running probe rather than waiting for the timeout
           if (!$fellBack) { $fellBack = true; $probe['type'] = 'running'; log_warn('No healthcheck on the running container (disabled?), falling back to the running probe'); }
           break;
         }
@@ -270,21 +279,21 @@ function wait_healthy(string $name, array $probe): ?string {
 }
 
 // ---------- rollback ----------
-/** Re-pointe le tag sur l'ancienne image (ne peut pas échouer), supprime la nouvelle en best-effort, rafraîchit le badge. */
+/** Re-points the tag to the previous image (cannot fail), removes the new one on a best-effort basis, refreshes the badge. */
 function restore_image(string $repo, string $oldImageID, string $newImageID): void {
   global $DockerClient, $DockerUpdate;
   if ($oldImageID === '' || $oldImageID === $newImageID) return;
-  // R11 : si le re-tag échoue, ne surtout pas supprimer la nouvelle image
+  // R11: if the re-tag fails, absolutely do not remove the new image
   dk('tag '.escapeshellarg($oldImageID).' '.escapeshellarg($repo), $rc);
   if ($rc !== 0) { log_err("Could not re-tag $repo to the previous image - the new image is kept"); return; }
-  // R16 : reloadUpdateStatus() réutilise le 'local' en cache → le réinitialiser depuis l'image re-taguée
+  // R16: reloadUpdateStatus() reuses the cached 'local' value -> reset it from the re-tagged image
   $DockerUpdate->setUpdateStatus($repo, $DockerUpdate->inspectLocalVersion($repo) ?? '');
-  $DockerClient->removeImage($newImageID);            // échoue sans conséquence si une autre container l'utilise
+  $DockerClient->removeImage($newImageID);            // fails harmlessly if another container is using it
   $DockerClient->flushCaches();
-  $DockerUpdate->reloadUpdateStatus($repo);           // le badge « update ready » revient : l'état vrai
+  $DockerUpdate->reloadUpdateStatus($repo);           // the "update ready" badge is back: the true state
   log_info("Image tag $repo restored to the previous image");
 }
-/** Mode sûr : supprime le nouveau container, remet l'ancien en place (nom, état, image), notifie. */
+/** Safe mode: removes the new container, puts the old one back in place (name, state, image), notifies. */
 function rollback_safe(array $u, string $reason): void {
   global $DockerClient;
   log_err("Update of {$u['name']} rolled back: $reason");
@@ -297,7 +306,7 @@ function rollback_safe(array $u, string $reason): void {
       return;
     }
     if ($u['wasRunning']) {
-      $r = $DockerClient->startContainer($u['name']);   // startContainer appelle déjà addRoute
+      $r = $DockerClient->startContainer($u['name']);   // startContainer already calls addRoute
       if ($r !== true) {
         log_err("Could not restart the previous container: $r - manual intervention required");
         notify_unraid('alert', "{$u['name']}: manual intervention required", "Previous container could not be restarted: $r");
@@ -311,7 +320,7 @@ function rollback_safe(array $u, string $reason): void {
   notify_unraid('alert', "{$u['name']}: update rolled back", $reason);
 }
 
-/** Fin de mise à jour réussie : supprime l'ancien container, l'ancienne image, notifie. */
+/** End of a successful update: removes the old container, the old image, notifies. */
 function finish_ok(array $u): void {
   global $DockerClient, $cfg;
   if (ct_exists($u['rollback'])) removeContainer_nchan($u['rollback']);
@@ -320,11 +329,11 @@ function finish_ok(array $u): void {
   if (($cfg['NOTIFY'] ?? 'yes') === 'yes') notify_unraid('normal', "{$u['name']}: updated", "Container {$u['name']} was updated and passed its health gate.");
   log_line('<b>'.htmlspecialchars($u['name']).' updated successfully</b>');
 }
-/** Mode sûr : stop → rename en .rollback → run → (porte de santé, tâche 7) → nettoyage. */
+/** Safe mode: stop -> rename to .rollback -> run -> (health gate, task 7) -> cleanup. */
 function update_safe(array $u): string {
   global $DockerClient;
   $GLOBALS['inflight'] = $u;
-  if ($u['wasRunning']) { $GLOBALS['inflight']['stoppedOld'] = true; stopContainer_nchan($u['name']); }   // R18 : flag posé avant le stop, un abort pendant le stop redémarre bien l'ancien
+  if ($u['wasRunning']) { $GLOBALS['inflight']['stoppedOld'] = true; stopContainer_nchan($u['name']); }   // R18: flag set before the stop, an abort during the stop does restart the old one
   if ($u['exists']) {
     $out = dk('rename '.escapeshellarg($u['name']).' '.escapeshellarg($u['rollback']), $rc);
     if ($rc !== 0) {
@@ -350,13 +359,13 @@ function update_safe(array $u): string {
 }
 
 // ---------- bluegreen ----------
-/** L'ancien a été arrêté : le remettre en service, supprimer la nouvelle instance, restaurer l'image. */
+/** The old one has been stopped: put it back into service, remove the new instance, restore the image. */
 function rollback_bg(array $u, string $reason): void {
   global $DockerClient;
   log_err("Update of {$u['name']} rolled back: $reason");
   if (ct_exists($u['rollback'])) {
     $out = dk('rename '.escapeshellarg($u['rollback']).' '.escapeshellarg($u['name']), $rc);
-    if ($rc !== 0) {   // R17 : ne pas supprimer .new, c'est la seule instance saine restante
+    if ($rc !== 0) {   // R17: do not remove .new, it is the only healthy instance left
       log_err("Could not rename {$u['rollback']} back to {$u['name']}: $out - manual intervention required ({$u['new']} is still running)");
       notify_unraid('alert', "{$u['name']}: manual intervention required", "Rollback failed: {$u['rollback']} could not be renamed back; {$u['new']} was left running.");
       return;
@@ -372,7 +381,7 @@ function rollback_bg(array $u, string $reason): void {
   $DockerClient->flushCaches();
   notify_unraid('alert', "{$u['name']}: update rolled back", $reason);
 }
-/** Nouvelle instance <nom>.new à côté de l'ancienne ; Traefik bascule une fois healthy ; puis double rename. */
+/** New <name>.new instance alongside the old one; Traefik switches over once healthy; then double rename. */
 function update_bluegreen(array $u): string {
   global $DockerClient;
   $GLOBALS['inflight'] = $u;
@@ -388,12 +397,12 @@ function update_bluegreen(array $u): string {
     unset($GLOBALS['inflight']);
     return 'rolled';
   }
-  $cmd = substr_replace($cmd, '--name='.escapeshellarg($u['new']), $pos, strlen($needle));   // R18 : 1re occurrence seulement
+  $cmd = substr_replace($cmd, '--name='.escapeshellarg($u['new']), $pos, strlen($needle));   // R18: first occurrence only
   $err = null;
   if (!execCommand_nchan($cmd))            $err = 'docker run failed';
   elseif (!connect_extra($u['new'], $u))   $err = 'could not connect one or more additional networks';
   else                                     $err = wait_healthy($u['new'], $u['probe']);
-  if ($err !== null) {                     // rollback sans coupure : l'ancien n'a jamais été arrêté
+  if ($err !== null) {                     // rollback without downtime: the old one was never stopped
     log_err("Update of {$u['name']} rolled back: $err");
     if (ct_exists($u['new'])) { container_logs($u['new']); dk('rm -f '.escapeshellarg($u['new'])); }
     restore_image($u['repo'], $u['oldImageID'], $u['newImageID']);
@@ -402,21 +411,21 @@ function update_bluegreen(array $u): string {
     unset($GLOBALS['inflight']);
     return 'rolled';
   }
-  $GLOBALS['inflight']['stoppedOld'] = true;   // R18 : flag posé avant le stop, un abort pendant le stop redémarre bien l'ancien
-  stopContainer_nchan($u['name']);         // Traefik retire l'ancienne instance sur l'événement stop
+  $GLOBALS['inflight']['stoppedOld'] = true;   // R18: flag set before the stop, an abort during the stop does restart the old one
+  stopContainer_nchan($u['name']);         // Traefik removes the old instance on the stop event
   $out = dk('rename '.escapeshellarg($u['name']).' '.escapeshellarg($u['rollback']), $rc);
   if ($rc !== 0) { rollback_bg($u, "rename failed: $out"); unset($GLOBALS['inflight']); return 'rolled'; }
   $out = dk('rename '.escapeshellarg($u['new']).' '.escapeshellarg($u['name']), $rc);
   if ($rc !== 0) { rollback_bg($u, "rename failed: $out"); unset($GLOBALS['inflight']); return 'rolled'; }
-  unset($GLOBALS['inflight']);             // point de non-retour : la nouvelle instance porte le nom
+  unset($GLOBALS['inflight']);             // point of no return: the new instance now carries the name
   addRoute($u['name']);
   log_info("Switched: {$u['name']} is now the new instance");
   finish_ok($u);
   return 'ok';
 }
 
-// ---------- un container ----------
-/** Retourne 'ok' | 'rolled' | 'skipped'. */
+// ---------- a single container ----------
+/** Returns 'ok' | 'rolled' | 'skipped'. */
 function update_one(string $name): string {
   global $DockerClient, $DockerTemplates, $cfg;
   $tmpl = $DockerTemplates->getUserTemplate($name);
@@ -436,22 +445,24 @@ function update_one(string $name): string {
   $u['exists']     = !empty($old['Id']);
   $u['wasRunning'] = !empty($old['State']['Running']);
   $u['oldImageID'] = $DockerClient->getImageID($Repository) ?: '';
-  if (!pullImage_nchan($Name, $Repository)) return 'skipped';   // rien n'a été touché
+  if (!pullImage_nchan($Name, $Repository)) return 'skipped';   // nothing has been touched
   $DockerClient->flushCaches();
   $u['newImageID'] = $DockerClient->getImageID($Repository) ?: '';
   $hasHealth  = image_has_health($u['newImageID']) || extra_has_health($info['extra']);
   $u['probe'] = resolve_probe($info['labels'], $hasHealth, $cfg);
-  foreach ($u['probe']['warnings'] as $w) log_warn($w);   // R23 : logué même si la porte n'est jamais atteinte (container stoppé avant)
+  foreach ($u['probe']['warnings'] as $w) log_warn($w);   // R23: logged even if the gate is never reached (container stopped beforehand)
   $strategy = 'safe';
   if (($info['labels']['rolling.strategy'] ?? 'safe') === 'bluegreen') {
     $missing = check_bluegreen($info, $u['wasRunning'], $hasHealth, network_driver($info['network']));
     if (!$missing) $strategy = 'bluegreen';
     else { log_warn('bluegreen strategy not applicable, using safe mode:'); foreach ($missing as $m) log_line('&nbsp;&nbsp;- '.htmlspecialchars($m)); }
   }
-  return $strategy === 'bluegreen' ? update_bluegreen($u) : update_safe($u);
+  $result = $strategy === 'bluegreen' ? update_bluegreen($u) : update_safe($u);
+  forget_webui_info($u['name']);   // the container changed either way: let the Docker tab recompute its badge
+  return $result;
 }
 
-// ---------- boucle principale ----------
+// ---------- main loop ----------
 write("<style>.logLine{font-family:bitstream!important;font-size:1.2rem!important;margin:0;padding:0}fieldset.docker{border:solid thin;margin-top:8px}legend{font-size:1.1rem!important;font-weight:bold}</style><p class='logLine'></p>");
 $summary = ['ok'=>[], 'rolled'=>[], 'skipped'=>[]];
 foreach (array_filter(explode('*', rawurldecode($argv[1] ?? ''))) as $name) {

@@ -2,8 +2,8 @@ Menu="Docker"
 Cond="is_file('/var/run/dockerd.pid')"
 ---
 <script>
-// docker.rolling.update : route les actions Update / Update All natives vers scripts/rolling_update.
-// docker.js est chargé en synchrone dans la page Docker, donc les globales existent au DOM ready.
+// docker.rolling.update: routes the native Update / Update All actions to scripts/rolling_update.
+// docker.js is loaded synchronously in the Docker page, so the globals exist by DOM ready.
 $(function(){
   if (typeof openDocker !== 'function' || typeof updateContainer !== 'function') return;
   window.updateContainer = function(container) {
