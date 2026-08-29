@@ -21,7 +21,17 @@ _(Grace period)_ (seconds):
 _(Notify on successful update)_:
 : <select name="NOTIFY"><?=mk_option($cfg['NOTIFY'] ?? 'yes', 'yes', _('Yes'))?><?=mk_option($cfg['NOTIFY'] ?? 'yes', 'no', _('No'))?></select>
 
-> Rollbacks always send an alert notification.
+> Normal notification when a container was updated and passed its health gate without any warning.
+
+_(Notify on update with warnings)_:
+: <select name="NOTIFY_WARNING"><?=mk_option($cfg['NOTIFY_WARNING'] ?? 'yes', 'yes', _('Yes'))?><?=mk_option($cfg['NOTIFY_WARNING'] ?? 'yes', 'no', _('No'))?></select>
+
+> Warning notification when the update succeeded but something was off: invalid label value, probe fallback, blue/green prerequisites missing. The warnings are listed in the notification.
+
+_(Notify on errors)_:
+: <select name="NOTIFY_ERROR"><?=mk_option($cfg['NOTIFY_ERROR'] ?? 'yes', 'yes', _('Yes'))?><?=mk_option($cfg['NOTIFY_ERROR'] ?? 'yes', 'no', _('No'))?></select>
+
+> Alert notification on rollback, on a skipped update (image pull failed, template not found, leftover `.rollback` container) and when manual intervention is required.
 
 &nbsp;
 : <input type="submit" value="_(Apply)_"><input type="button" value="_(Done)_" onclick="done()">

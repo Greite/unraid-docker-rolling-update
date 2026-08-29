@@ -36,7 +36,7 @@ function write(...$messages) {
 }
 function log_line(string $html): void { write("addLog\0$html"); }
 function log_info(string $txt): void  { log_line(htmlspecialchars($txt)); }
-function log_warn(string $txt): void  { log_line("<span class='orange-text'><b>Warning:</b> ".htmlspecialchars($txt).'</span>'); }
+function log_warn(string $txt): void  { $GLOBALS['warnings'][] = $txt; log_line("<span class='orange-text'><b>Warning:</b> ".htmlspecialchars($txt).'</span>'); }
 function log_err(string $txt): void   { log_line("<span class='error'><b>Error:</b> ".htmlspecialchars($txt).'</span>'); }
 
 // ---------- small Docker helpers ----------
@@ -65,11 +65,13 @@ function forget_webui_info(string $name): void {
 }
 
 function notify_unraid(string $importance, string $subject, string $description): void {
-  global $docroot, $var, $notify;
+  global $docroot, $var, $notify, $cfg;
+  if (!notify_wanted($importance, $cfg)) return;      // Settings: NOTIFY (normal) / NOTIFY_WARNING (warning) / NOTIFY_ERROR (alert)
   $server = strtoupper(_var($var, 'NAME', 'tower'));
+  $prefix = ['normal'=>'Notice', 'warning'=>'Warning', 'alert'=>'Alert'][$importance] ?? 'Notice';
   $output = _var($notify, 'docker_notify');           // same channels as the native Docker notifications
   // no -x: a single ticket per event would swallow all subsequent notifications (the native code gets away with it because its event contains name+version)
-  exec("$docroot/webGui/scripts/notify -e ".escapeshellarg('Docker Rolling Update').' -s '.escapeshellarg("Notice [$server] - $subject").' -d '.escapeshellarg($description).' -i '.escapeshellarg(trim("$importance $output"))." -l '/Docker'");
+  exec("$docroot/webGui/scripts/notify -e ".escapeshellarg('Docker Rolling Update').' -s '.escapeshellarg("$prefix [$server] - $subject").' -d '.escapeshellarg($description).' -i '.escapeshellarg(trim("$importance $output"))." -l '/Docker'");
 }
 
 // ---------- abort / fatal error: put the old container back into service ----------
@@ -322,11 +324,13 @@ function rollback_safe(array $u, string $reason): void {
 
 /** End of a successful update: removes the old container, the old image, notifies. */
 function finish_ok(array $u): void {
-  global $DockerClient, $cfg;
+  global $DockerClient;
   if (ct_exists($u['rollback'])) removeContainer_nchan($u['rollback']);
   $DockerClient->flushCaches();
   if ($u['oldImageID'] !== '' && $u['oldImageID'] !== $u['newImageID']) removeImage_nchan($u['oldImageID']);
-  if (($cfg['NOTIFY'] ?? 'yes') === 'yes') notify_unraid('normal', "{$u['name']}: updated", "Container {$u['name']} was updated and passed its health gate.");
+  $warnings = $GLOBALS['warnings'] ?? [];
+  if ($warnings) notify_unraid('warning', "{$u['name']}: updated with warnings", "Container {$u['name']} was updated and passed its health gate. Warnings: ".implode(' | ', $warnings));
+  else           notify_unraid('normal', "{$u['name']}: updated", "Container {$u['name']} was updated and passed its health gate.");
   log_line('<b>'.htmlspecialchars($u['name']).' updated successfully</b>');
 }
 /** Safe mode: stop -> rename to .rollback -> run -> (health gate, task 7) -> cleanup. */
@@ -428,8 +432,13 @@ function update_bluegreen(array $u): string {
 /** Returns 'ok' | 'rolled' | 'skipped'. */
 function update_one(string $name): string {
   global $DockerClient, $DockerTemplates, $cfg;
+  $GLOBALS['warnings'] = [];
   $tmpl = $DockerTemplates->getUserTemplate($name);
-  if (!$tmpl) { log_err("Configuration not found for '$name'. Was this container created using the Docker template system?"); return 'skipped'; }
+  if (!$tmpl) {
+    log_err("Configuration not found for '$name'. Was this container created using the Docker template system?");
+    notify_unraid('alert', "$name: update skipped", "Configuration not found for '$name' - was this container created using the Docker template system?");
+    return 'skipped';
+  }
   $xml = file_get_contents($tmpl);
   [$cmd, $Name, $Repository] = xmlToCommand($tmpl);
   $info = template_info($xml);
@@ -439,13 +448,17 @@ function update_one(string $name): string {
   log_line("<p class='logLine'></p><b>=== ".htmlspecialchars($Name).' ===</b>');
   if (ct_exists($u['rollback'])) {
     log_err("A container named {$u['rollback']} already exists (a previous update was interrupted). Check it, then remove or rename it manually.");
+    notify_unraid('alert', "$Name: update skipped", "A container named {$u['rollback']} already exists (a previous update was interrupted): check it, then remove or rename it manually.");
     return 'skipped';
   }
   $old = $DockerClient->getContainerDetails($Name);
   $u['exists']     = !empty($old['Id']);
   $u['wasRunning'] = !empty($old['State']['Running']);
   $u['oldImageID'] = $DockerClient->getImageID($Repository) ?: '';
-  if (!pullImage_nchan($Name, $Repository)) return 'skipped';   // nothing has been touched
+  if (!pullImage_nchan($Name, $Repository)) {   // nothing has been touched
+    notify_unraid('alert', "$Name: update skipped", "Image pull failed for {$u['repo']} - nothing was changed.");
+    return 'skipped';
+  }
   $DockerClient->flushCaches();
   $u['newImageID'] = $DockerClient->getImageID($Repository) ?: '';
   $hasHealth  = image_has_health($u['newImageID']) || extra_has_health($info['extra']);

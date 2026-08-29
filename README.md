@@ -22,6 +22,12 @@ Uninstalling restores the native Update button.
 | `rolling.timeout` | seconds | Settings (120) |
 | `rolling.grace` | seconds | Settings (15) (if grace > timeout, timeout is raised to grace) |
 
+## Notifications
+
+Settings → Docker Rolling Update: three independent toggles - success (normal), success with warnings
+(warning: invalid label, probe fallback, blue/green prerequisites missing), errors (alert: rollback, skipped
+update, manual intervention required). All enabled by default.
+
 ## Blue/green prerequisites
 
 User-defined bridge network, no host port mapping, no fixed IP, a healthcheck, Traefik labels with an
