@@ -56,6 +56,14 @@ function container_logs(string $name, int $tail = 50): void {
   $l = dk("logs --tail $tail ".escapeshellarg($name));
   if ($l !== '') log_line("<fieldset class='docker'><legend>Last $tail log lines of ".htmlspecialchars($name)."</legend><pre style='white-space:pre-wrap'>".htmlspecialchars($l).'</pre></fieldset>');
 }
+/** Drop the per-container UI cache entry (docker.json) so getAllInfo() recomputes "updated" on the next Docker page load.
+ *  The native flow gets this for free from removeContainer(); we rename instead of removing, so do it explicitly. */
+function forget_webui_info(string $name): void {
+  global $dockerManPaths;
+  $info = DockerUtil::loadJSON($dockerManPaths["webui-info"]);
+  if (isset($info[$name])) { unset($info[$name]); DockerUtil::saveJSON($dockerManPaths["webui-info"], $info); }
+}
+
 function notify_unraid(string $importance, string $subject, string $description): void {
   global $docroot, $var, $notify;
   $server = strtoupper(_var($var, 'NAME', 'tower'));
@@ -82,6 +90,7 @@ function abort_handler(): void {
       restore_image($u['repo'], $u['oldImageID'], $u['newImageID']);
       notify_unraid('alert', "{$u['name']}: update interrupted", 'Operation aborted; previous container kept.');
     }
+    forget_webui_info($u['name']);
   }
   write('_DONE_', '');
   exit(130);
@@ -448,7 +457,9 @@ function update_one(string $name): string {
     if (!$missing) $strategy = 'bluegreen';
     else { log_warn('bluegreen strategy not applicable, using safe mode:'); foreach ($missing as $m) log_line('&nbsp;&nbsp;- '.htmlspecialchars($m)); }
   }
-  return $strategy === 'bluegreen' ? update_bluegreen($u) : update_safe($u);
+  $result = $strategy === 'bluegreen' ? update_bluegreen($u) : update_safe($u);
+  forget_webui_info($u['name']);   // the container changed either way: let the Docker tab recompute its badge
+  return $result;
 }
 
 // ---------- main loop ----------

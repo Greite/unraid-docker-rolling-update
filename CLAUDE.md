@@ -18,6 +18,7 @@
 - `DockerUpdate::reloadUpdateStatus()` reuses the cached `local` digest: after re-tagging an image, reset it with `setUpdateStatus(repo, inspectLocalVersion(repo))`
 - `connectExtraNetworks()` does not exist on 7.3.2: keep the `function_exists` guard
 - `notify -x` deduplicates by event name: never use it for per-update notifications
+- The Docker tab caches `updated` per container in `state/plugins/dynamix.docker.manager/docker.json`; native `removeContainer()` drops the entry, our rename does not: call `forget_webui_info($name)` after any change (`make checkbadge CT=<name>` shows what the tab will display)
 - `xmlToCommand()` emits `--name=` + `escapeshellarg(name)` and interpolates ExtraParams/PostArgs raw
 - `openDocker('<script> <args>')` runs any `plugins/*/scripts/<script>`; output goes to nchan channel `docker`, end with `_DONE_`
 - Traefik's Docker provider skips `starting`/`unhealthy` containers (the health gate is what makes blue/green safe)
