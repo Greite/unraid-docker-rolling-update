@@ -96,8 +96,8 @@ Pour chaque nom :
    (absent en 7.3.2), `addRoute()` si démarré. Commande en échec → **rollback** (§6).
 7. **Porte de santé** (§5) si `wasRunning`. Échec → **rollback**.
 8. **Succès** : `docker rm <nom>.rollback`, `removeImage(oldImageID)` si différent
-   du nouveau (miroir natif), `flushCaches()`. Notification `normal` si
-   `NOTIFY=yes`.
+   du nouveau (miroir natif), `flushCaches()`. Notification `normal`, ou
+   `warning` si des avertissements ont été journalisés (selon `NOTIFY`/`NOTIFY_WARNING`).
 9. Résumé final : « N mis à jour, M restaurés ». `write('_DONE_')`. Code de
    sortie 1 si M > 0, 0 sinon (ignoré en 7.3.2, exploité par le tray de `master`).
 
@@ -272,7 +272,9 @@ Unraid standard (`/update.php`, `#file=docker.rolling.update/docker.rolling.upda
 |---|---|---|
 | `TIMEOUT` | `120` | Délai max de la porte de santé (s) |
 | `GRACE` | `15` | Durée d'observation de la sonde `running` (s) |
-| `NOTIFY` | `yes` | Notification sur succès (les rollbacks notifient toujours) |
+| `NOTIFY` | `yes` | Notification `normal` sur succès sans avertissement |
+| `NOTIFY_WARNING` | `yes` | Notification `warning` sur succès avec avertissements (label invalide, repli de sonde, prérequis bluegreen manquants) |
+| `NOTIFY_ERROR` | `yes` | Notification `alert` : rollback, mise à jour ignorée (pull échoué, template absent, `.rollback` résiduel), intervention manuelle |
 
 Plus un rappel des labels disponibles.
 

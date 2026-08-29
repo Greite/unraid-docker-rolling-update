@@ -87,6 +87,12 @@ function check_bluegreen(array $info, bool $wasRunning, bool $hasHealth, ?string
   return $m;
 }
 
+/** Whether a notification of the given Unraid importance (normal|warning|alert) is enabled in the settings. */
+function notify_wanted(string $importance, array $cfg): bool {
+  $key = ['normal'=>'NOTIFY', 'warning'=>'NOTIFY_WARNING', 'alert'=>'NOTIFY_ERROR'][$importance] ?? 'NOTIFY_ERROR';
+  return ($cfg[$key] ?? 'yes') !== 'no';
+}
+
 function rolling_selftest(): bool {
   $fails = 0; $n = 0;
   $t = function (bool $cond, string $msg) use (&$fails, &$n) { $n++; if (!$cond) { $fails++; fwrite(STDERR, "FAIL: $msg\n"); } };
@@ -167,6 +173,11 @@ XML;
   $t(count(check_bluegreen(['extra'=>'--ip=10.0.0.5 --health-cmd=x'] + $ok, true, true, 'bridge')) === 1, '--ip refused');
   $t(count(check_bluegreen(['tailscale'=>true] + $ok, true, true, 'bridge')) === 1, 'tailscale refused');
   $t(count(check_bluegreen(['labels'=>[]] + $ok, true, true, 'bridge')) === 1, 'no traefik labels refused');
+
+  $t(notify_wanted('normal', []) && notify_wanted('warning', []) && notify_wanted('alert', []), 'notifications default to yes');
+  $t(!notify_wanted('normal', ['NOTIFY'=>'no']) && notify_wanted('alert', ['NOTIFY'=>'no']), 'NOTIFY=no only silences success');
+  $t(!notify_wanted('warning', ['NOTIFY_WARNING'=>'no']) && notify_wanted('normal', ['NOTIFY_WARNING'=>'no']), 'NOTIFY_WARNING=no only silences warnings');
+  $t(!notify_wanted('alert', ['NOTIFY_ERROR'=>'no']) && notify_wanted('warning', ['NOTIFY_ERROR'=>'no']), 'NOTIFY_ERROR=no only silences errors');
 
   echo $fails ? "selftest FAILED ($fails/$n)\n" : "selftest OK ($n checks)\n";
   return $fails === 0;
