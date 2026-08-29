@@ -3,8 +3,8 @@
 <!ENTITY name      "docker.rolling.update">
 <!ENTITY author    "GreiteTurtle">
 <!ENTITY github    "Greite/unraid-docker-rolling-update">
-<!ENTITY version   "2026.08.28">
-<!ENTITY md5       "04002b0b9879ca2e04eb43f6e9fd829e">
+<!ENTITY version   "2026.08.29">
+<!ENTITY md5       "6015766ea71f6e0c10701671de4cdca4">
 <!ENTITY launch    "Settings/RollingUpdateSettings">
 <!ENTITY plugdir   "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/&github;/main/&name;.plg">
@@ -12,6 +12,9 @@
 <PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="refresh" min="7.3.0" support="https://github.com/&github;/issues">
 
 <CHANGES>
+###2026.08.29
+- Fix: containers no longer keep showing "update ready" after a successful update (per-container UI cache is now invalidated).
+
 ###2026.08.28
 - Initial release: sequential updates with health gate and automatic rollback (container and image), opt-in blue/green strategy for containers behind Traefik.
 </CHANGES>
