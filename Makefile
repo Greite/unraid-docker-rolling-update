@@ -17,7 +17,7 @@ ifeq ($(PORTS),1)
 PORTLINE := <Config Name="HTTP" Target="80" Default="18081" Mode="tcp" Description="" Type="Port" Display="always" Required="false" Mask="false">18081</Config>
 endif
 
-.PHONY: deploy selftest testct testbg measure testclean build
+.PHONY: deploy selftest testct testbg measure testclean build checkbadge
 
 deploy: ## rsync the plugin to the server's RAM disk (lost on reboot) + initial cfg
 	rsync -a --delete $(SRC)/ $(HOST):/$(PLUGDIR)/
@@ -28,11 +28,11 @@ selftest: ## self-test of the pure functions, no Docker required
 
 testct: ## disposable RollingTest container (bridge, port 18080) with a simulated "update ready"
 	sed -e 's|@PROBE@|$(PROBE)|' -e 's|@TIMEOUT@|$(TIMEOUT)|' tests/templates/my-RollingTest.xml | ssh $(HOST) 'cat > $(TPL)/my-RollingTest.xml'
-	ssh $(HOST) 'docker rm -f RollingTest RollingTest.rollback RollingTest.new >/dev/null 2>&1; docker pull -q nginx:1.27.0-alpine >/dev/null && docker tag nginx:1.27.0-alpine nginx:stable-alpine && $(DM)/rebuild_container RollingTest >/dev/null; docker start RollingTest >/dev/null && php -r '"'"'$$docroot="/usr/local/emhttp"; require "$$docroot/plugins/dynamix.docker.manager/include/DockerClient.php"; (new DockerTemplates())->getAllInfo(true);'"'"' >/dev/null; docker ps --filter name=^RollingTest$$ --format "{{.Names}} {{.Status}} {{.Image}}"'
+	ssh $(HOST) 'docker rm -f RollingTest RollingTest.rollback RollingTest.new >/dev/null 2>&1; docker pull -q nginx:1.27.0-alpine >/dev/null && docker tag nginx:1.27.0-alpine nginx:stable-alpine && $(DM)/rebuild_container RollingTest >/dev/null; docker start RollingTest >/dev/null && php -r '"'"'$$docroot="/usr/local/emhttp"; require "$$docroot/plugins/dynamix.docker.manager/include/DockerClient.php"; $$s=DockerUtil::loadJSON($$dockerManPaths["update-status"]); unset($$s["library/nginx:stable-alpine"]); DockerUtil::saveJSON($$dockerManPaths["update-status"],$$s); (new DockerTemplates())->getAllInfo(true);'"'"' >/dev/null; docker ps --filter name=^RollingTest$$ --format "{{.Names}} {{.Status}} {{.Image}}"'
 
 testbg: ## disposable RollingBG container (frontend, Traefik, bluegreen) with a simulated "update ready"
 	sed -e 's|@PROBE@|$(PROBE)|' -e 's|@TIMEOUT@|$(TIMEOUT)|' -e 's|@BGHOST@|$(BGHOST)|' -e 's|<!--PORT-->|$(PORTLINE)|' tests/templates/my-RollingBG.xml | ssh $(HOST) 'cat > $(TPL)/my-RollingBG.xml'
-	ssh $(HOST) 'docker rm -f RollingBG RollingBG.rollback RollingBG.new >/dev/null 2>&1; docker pull -q nginx:1.27.0-alpine >/dev/null && docker tag nginx:1.27.0-alpine nginx:stable-alpine && $(DM)/rebuild_container RollingBG >/dev/null; docker start RollingBG >/dev/null && php -r '"'"'$$docroot="/usr/local/emhttp"; require "$$docroot/plugins/dynamix.docker.manager/include/DockerClient.php"; (new DockerTemplates())->getAllInfo(true);'"'"' >/dev/null; docker ps --filter name=^RollingBG$$ --format "{{.Names}} {{.Status}} {{.Image}}"'
+	ssh $(HOST) 'docker rm -f RollingBG RollingBG.rollback RollingBG.new >/dev/null 2>&1; docker pull -q nginx:1.27.0-alpine >/dev/null && docker tag nginx:1.27.0-alpine nginx:stable-alpine && $(DM)/rebuild_container RollingBG >/dev/null; docker start RollingBG >/dev/null && php -r '"'"'$$docroot="/usr/local/emhttp"; require "$$docroot/plugins/dynamix.docker.manager/include/DockerClient.php"; $$s=DockerUtil::loadJSON($$dockerManPaths["update-status"]); unset($$s["library/nginx:stable-alpine"]); DockerUtil::saveJSON($$dockerManPaths["update-status"],$$s); (new DockerTemplates())->getAllInfo(true);'"'"' >/dev/null; docker ps --filter name=^RollingBG$$ --format "{{.Names}} {{.Status}} {{.Image}}"'
 
 measure: ## 60 s of requests every 100 ms from the host; prints requests= failures=
 	ssh $(HOST) 'end=$$((SECONDS+60)); ko=0; n=0; while [ $$SECONDS -lt $$end ]; do c=$$(curl -sk --resolve $(HOSTHDR):$(PORT):127.0.0.1 -o /dev/null -m 2 -w "%{http_code}" $(SCHEME)://$(HOSTHDR):$(PORT)/); n=$$((n+1)); [ "$$c" = 200 ] || ko=$$((ko+1)); sleep 0.1; done; echo "requests=$$n failures=$$ko"'
@@ -44,3 +44,6 @@ build: deploy ## builds archive/<name>-<version>.txz (GNU tar from the server, o
 	mkdir -p archive
 	ssh $(HOST) 'cd / && tar -cJf - --owner=0 --group=0 $(PLUGDIR)' > archive/$(NAME)-$(VERSION).txz
 	md5=$$(md5 -q archive/$(NAME)-$(VERSION).txz); sed -i '' -e "s|<!ENTITY version *\".*\">|<!ENTITY version   \"$(VERSION)\">|" -e "s|<!ENTITY md5 *\".*\">|<!ENTITY md5       \"$$md5\">|" $(NAME).plg; echo "archive/$(NAME)-$(VERSION).txz md5=$$md5"
+
+checkbadge: ## page-logic update status of a container (what the Docker tab shows), e.g. make checkbadge CT=RollingTest
+	ssh $(HOST) 'php -r '"'"'$$docroot="/usr/local/emhttp"; require "$$docroot/plugins/dynamix.docker.manager/include/DockerClient.php"; $$i=(new DockerTemplates())->getAllInfo(); echo "$(CT) updated=", var_export($$i["$(CT)"]["updated"] ?? "absent", true), "\n";'"'"''
