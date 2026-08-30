@@ -12,6 +12,9 @@
 <PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="refresh" min="7.3.0" support="https://github.com/&github;/issues">
 
 <CHANGES>
+###2026.08.30a
+- Settings: switch to disable the plugin entirely (native Update buttons restored, settings kept).
+
 ###2026.08.30
 - Settings: choose which containers the rolling update handles; unchecked containers are updated the native way (no health gate, no rollback).
 
