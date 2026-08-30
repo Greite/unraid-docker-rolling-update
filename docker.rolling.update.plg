@@ -3,8 +3,8 @@
 <!ENTITY name      "docker.rolling.update">
 <!ENTITY author    "GreiteTurtle">
 <!ENTITY github    "Greite/unraid-docker-rolling-update">
-<!ENTITY version   "2026.08.30">
-<!ENTITY md5       "d3f0433a72735bfaf0d9df10031984a7">
+<!ENTITY version   "2026.08.30a">
+<!ENTITY md5       "34f53b966fc58f8f1a97df6ac3a77574">
 <!ENTITY launch    "Settings/RollingUpdateSettings">
 <!ENTITY plugdir   "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/&github;/main/&name;.plg">
