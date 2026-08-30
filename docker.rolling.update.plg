@@ -3,8 +3,8 @@
 <!ENTITY name      "docker.rolling.update">
 <!ENTITY author    "GreiteTurtle">
 <!ENTITY github    "Greite/unraid-docker-rolling-update">
-<!ENTITY version   "2026.08.29a">
-<!ENTITY md5       "6c9724948b8a8196a8f27ac4467bf08d">
+<!ENTITY version   "2026.08.30">
+<!ENTITY md5       "d3f0433a72735bfaf0d9df10031984a7">
 <!ENTITY launch    "Settings/RollingUpdateSettings">
 <!ENTITY plugdir   "/usr/local/emhttp/plugins/&name;">
 <!ENTITY pluginURL "https://raw.githubusercontent.com/&github;/main/&name;.plg">
@@ -12,6 +12,9 @@
 <PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" icon="refresh" min="7.3.0" support="https://github.com/&github;/issues">
 
 <CHANGES>
+###2026.08.30
+- Settings: choose which containers the rolling update handles; unchecked containers are updated the native way (no health gate, no rollback).
+
 ###2026.08.29a
 - Settings: separate notification toggles for success, success with warnings and errors (rollback, skipped update, manual intervention); skipped updates now send an alert.
 
