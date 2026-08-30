@@ -93,6 +93,11 @@ function notify_wanted(string $importance, array $cfg): bool {
   return ($cfg[$key] ?? 'yes') !== 'no';
 }
 
+/** Containers unchecked in Settings (comma-separated EXCLUDE key) are updated the native way instead of the rolling update. */
+function rolling_excluded(string $name, array $cfg): bool {
+  return in_array($name, array_filter(array_map('trim', explode(',', $cfg['EXCLUDE'] ?? ''))), true);
+}
+
 function rolling_selftest(): bool {
   $fails = 0; $n = 0;
   $t = function (bool $cond, string $msg) use (&$fails, &$n) { $n++; if (!$cond) { $fails++; fwrite(STDERR, "FAIL: $msg\n"); } };
@@ -178,6 +183,9 @@ XML;
   $t(!notify_wanted('normal', ['NOTIFY'=>'no']) && notify_wanted('alert', ['NOTIFY'=>'no']), 'NOTIFY=no only silences success');
   $t(!notify_wanted('warning', ['NOTIFY_WARNING'=>'no']) && notify_wanted('normal', ['NOTIFY_WARNING'=>'no']), 'NOTIFY_WARNING=no only silences warnings');
   $t(!notify_wanted('alert', ['NOTIFY_ERROR'=>'no']) && notify_wanted('warning', ['NOTIFY_ERROR'=>'no']), 'NOTIFY_ERROR=no only silences errors');
+
+  $t(rolling_excluded('Plex', ['EXCLUDE'=>'Plex, Sonarr']) && !rolling_excluded('Radarr', ['EXCLUDE'=>'Plex, Sonarr']), 'EXCLUDE list membership');
+  $t(!rolling_excluded('Plex', []) && !rolling_excluded('', ['EXCLUDE'=>'']), 'empty EXCLUDE excludes nothing');
 
   echo $fails ? "selftest FAILED ($fails/$n)\n" : "selftest OK ($n checks)\n";
   return $fails === 0;
