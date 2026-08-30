@@ -6,7 +6,7 @@
 - `archive/*.txz` + `docker.rolling.update.plg` are build outputs and ARE committed (the .plg URL points at them on `main`)
 
 ## Commands
-- `make selftest` - 43 pure checks, local PHP, no Docker (run before every commit)
+- `make selftest` - 45 pure checks, local PHP, no Docker (run before every commit)
 - `make deploy` - rsync to the test server RAM disk; overwrites a package install (same files, fine)
 - `make build` - rebuilds the txz on the server and re-stamps the md5 in the .plg: run it and commit `archive/` + `.plg` after ANY change under `source/`
 - `make testct` / `make testbg [PROBE= TIMEOUT= PORTS=1]` - throwaway containers `RollingTest` / `RollingBG` with a simulated "update ready" (old nginx tag); never touch other containers on the test server
@@ -26,7 +26,7 @@
 
 ## Conventions
 - UI/log strings, code comments and commit messages all in English
-- Per-container settings are labels (`rolling.strategy|probe|timeout|grace`), not new UI
+- Per-container tuning is labels (`rolling.strategy|probe|timeout|grace`); the only per-container UI is the Settings checklist (`EXCLUDE`, comma-separated names -> native update)
 - Gitflow: work on `feature/*` from `develop`, releases to `main` with a signed `vYYYY.MM.DD` tag; commit messages in English (conventional commits)
 - Never commit or mention in commits: the test server name, personal domains, real hosts (use `local.mk`); never pass `-c user.email` - the repo's git profile signs commits
 

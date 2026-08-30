@@ -4,9 +4,24 @@ Icon="refresh"
 ---
 <?
 $cfg = parse_plugin_cfg('docker.rolling.update');
+require_once "$docroot/plugins/dynamix.docker.manager/include/DockerClient.php";
+require_once "$docroot/plugins/docker.rolling.update/include/rolling.php";
+$ctList = '';   // one checkbox per template container, checked = handled by the rolling update
+foreach ((new DockerTemplates())->getTemplates('user') as $t) {
+  $x = @simplexml_load_file($t['path']);
+  $n = $x ? trim((string)$x->Name) : '';
+  if ($n === '') continue;
+  $ctList .= "<label style='display:inline-block;min-width:16em;margin:2px 0'><input type='checkbox' class='rolling-ct' value='".htmlspecialchars($n)."'".(rolling_excluded($n, $cfg) ? '' : ' checked')."> ".htmlspecialchars($n).'</label>';
+}
 ?>
-<form markdown="1" method="POST" action="/update.php" target="progressFrame">
+<form markdown="1" method="POST" action="/update.php" target="progressFrame" onsubmit="$('#EXCLUDE').val($('.rolling-ct:not(:checked)').map(function(){return this.value}).get().join(','))">
 <input type="hidden" name="#file" value="docker.rolling.update/docker.rolling.update.cfg">
+<input type="hidden" name="EXCLUDE" id="EXCLUDE" value="<?=htmlspecialchars($cfg['EXCLUDE'] ?? '')?>">
+
+_(Containers handled by the rolling update)_:
+: <span id="rolling-cts"><?=$ctList ?: '<i>'._('No container templates found').'</i>'?></span>
+
+> Unchecked containers are updated the native way (pull, stop, remove, recreate: no health gate, no rollback). Containers created later are handled by the rolling update until unchecked here. <a href="#" onclick="$('.rolling-ct').prop('checked',true);return false">Select all</a> - <a href="#" onclick="$('.rolling-ct').prop('checked',false);return false">Select none</a>
 
 _(Health gate timeout)_ (seconds):
 : <input type="number" name="TIMEOUT" min="5" max="3600" value="<?=htmlspecialchars($cfg['TIMEOUT'] ?? '120')?>">

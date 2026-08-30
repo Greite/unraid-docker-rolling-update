@@ -323,14 +323,14 @@ function rollback_safe(array $u, string $reason): void {
 }
 
 /** End of a successful update: removes the old container, the old image, notifies. */
-function finish_ok(array $u): void {
+function finish_ok(array $u, string $how = 'was updated and passed its health gate'): void {
   global $DockerClient;
   if (ct_exists($u['rollback'])) removeContainer_nchan($u['rollback']);
   $DockerClient->flushCaches();
   if ($u['oldImageID'] !== '' && $u['oldImageID'] !== $u['newImageID']) removeImage_nchan($u['oldImageID']);
   $warnings = $GLOBALS['warnings'] ?? [];
-  if ($warnings) notify_unraid('warning', "{$u['name']}: updated with warnings", "Container {$u['name']} was updated and passed its health gate. Warnings: ".implode(' | ', $warnings));
-  else           notify_unraid('normal', "{$u['name']}: updated", "Container {$u['name']} was updated and passed its health gate.");
+  if ($warnings) notify_unraid('warning', "{$u['name']}: updated with warnings", "Container {$u['name']} $how. Warnings: ".implode(' | ', $warnings));
+  else           notify_unraid('normal', "{$u['name']}: updated", "Container {$u['name']} $how.");
   log_line('<b>'.htmlspecialchars($u['name']).' updated successfully</b>');
 }
 /** Safe mode: stop -> rename to .rollback -> run -> (health gate, task 7) -> cleanup. */
@@ -428,8 +428,27 @@ function update_bluegreen(array $u): string {
   return 'ok';
 }
 
+// ---------- native (container unchecked in Settings) ----------
+/** Same sequence as Unraid's own Update: stop -> remove -> recreate. No health gate, no rollback. */
+function update_native(array $u): string {
+  log_line('<b>Strategy: native</b> - container excluded from the rolling update in Settings (no health gate, no rollback)');
+  if ($u['wasRunning']) stopContainer_nchan($u['name']);
+  if ($u['exists']) removeContainer_nchan($u['name']);
+  $cmd = tailscale_wrap($u);
+  if ($u['wasRunning']) $cmd = str_replace('/docker create ', '/docker run -d ', $cmd);
+  if (!execCommand_nchan($cmd)) {
+    log_err("Update of {$u['name']} failed: docker run failed (native mode: the previous container is already gone)");
+    notify_unraid('alert', "{$u['name']}: update failed", 'docker run failed and the previous container had already been removed (native mode, no rollback). Check the Docker page.');
+    return 'failed';
+  }
+  if (!connect_extra($u['name'], $u)) log_warn('could not connect one or more additional networks');
+  if ($u['wasRunning']) addRoute($u['name']);
+  finish_ok($u, 'was updated (native mode, no health gate)');
+  return 'ok';
+}
+
 // ---------- a single container ----------
-/** Returns 'ok' | 'rolled' | 'skipped'. */
+/** Returns 'ok' | 'rolled' | 'failed' | 'skipped'. */
 function update_one(string $name): string {
   global $DockerClient, $DockerTemplates, $cfg;
   $GLOBALS['warnings'] = [];
@@ -461,6 +480,7 @@ function update_one(string $name): string {
   }
   $DockerClient->flushCaches();
   $u['newImageID'] = $DockerClient->getImageID($Repository) ?: '';
+  if (rolling_excluded($Name, $cfg)) { $result = update_native($u); forget_webui_info($u['name']); return $result; }
   $hasHealth  = image_has_health($u['newImageID']) || extra_has_health($info['extra']);
   $u['probe'] = resolve_probe($info['labels'], $hasHealth, $cfg);
   foreach ($u['probe']['warnings'] as $w) log_warn($w);   // R23: logged even if the gate is never reached (container stopped beforehand)
@@ -477,10 +497,10 @@ function update_one(string $name): string {
 
 // ---------- main loop ----------
 write("<style>.logLine{font-family:bitstream!important;font-size:1.2rem!important;margin:0;padding:0}fieldset.docker{border:solid thin;margin-top:8px}legend{font-size:1.1rem!important;font-weight:bold}</style><p class='logLine'></p>");
-$summary = ['ok'=>[], 'rolled'=>[], 'skipped'=>[]];
+$summary = ['ok'=>[], 'rolled'=>[], 'failed'=>[], 'skipped'=>[]];
 foreach (array_filter(explode('*', rawurldecode($argv[1] ?? ''))) as $name) {
   $summary[update_one($name)][] = $name;
 }
-log_line('<br><b>Summary:</b> '.count($summary['ok']).' updated, '.count($summary['rolled']).' rolled back, '.count($summary['skipped']).' skipped');
+log_line('<br><b>Summary:</b> '.count($summary['ok']).' updated, '.count($summary['rolled']).' rolled back, '.count($summary['failed']).' failed, '.count($summary['skipped']).' skipped');
 write('_DONE_', '');
-exit(count($summary['rolled']) ? 1 : 0);
+exit(count($summary['rolled']) + count($summary['failed']) ? 1 : 0);
