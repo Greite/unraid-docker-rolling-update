@@ -18,6 +18,11 @@ foreach ((new DockerTemplates())->getTemplates('user') as $t) {
 <input type="hidden" name="#file" value="docker.rolling.update/docker.rolling.update.cfg">
 <input type="hidden" name="EXCLUDE" id="EXCLUDE" value="<?=htmlspecialchars($cfg['EXCLUDE'] ?? '')?>">
 
+_(Enable the rolling update)_:
+: <select name="ENABLED"><?=mk_option($cfg['ENABLED'] ?? 'yes', 'yes', _('Yes'))?><?=mk_option($cfg['ENABLED'] ?? 'yes', 'no', _('No'))?></select>
+
+> No: the Update / Update All buttons of the Docker page behave natively again for every container (pull, stop, remove, recreate: no health gate, no rollback). The plugin stays installed and the settings below are kept. Reload the Docker page after changing this.
+
 _(Containers handled by the rolling update)_:
 : <span id="rolling-cts"><?=$ctList ?: '<i>'._('No container templates found').'</i>'?></span>
 
