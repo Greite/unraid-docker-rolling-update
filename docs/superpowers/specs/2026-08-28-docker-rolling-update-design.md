@@ -272,6 +272,7 @@ Unraid standard (`/update.php`, `#file=docker.rolling.update/docker.rolling.upda
 |---|---|---|
 | `TIMEOUT` | `120` | Délai max de la porte de santé (s) |
 | `GRACE` | `15` | Durée d'observation de la sonde `running` (s) |
+| `ENABLED` | `yes` | `no` : la surcharge des boutons Update n'est plus injectée et le script traite tout en natif (plugin installé, réglages conservés) |
 | `EXCLUDE` | vide | Noms (séparés par des virgules) des containers décochés dans Settings : mis à jour à la manière native (stop → rm → recréation, sans health gate ni rollback) |
 | `NOTIFY` | `yes` | Notification `normal` sur succès sans avertissement |
 | `NOTIFY_WARNING` | `yes` | Notification `warning` sur succès avec avertissements (label invalide, repli de sonde, prérequis bluegreen manquants) |

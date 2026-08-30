@@ -1,8 +1,10 @@
 Menu="Docker"
 Cond="is_file('/var/run/dockerd.pid')"
 ---
+<?if ((parse_plugin_cfg('docker.rolling.update')['ENABLED'] ?? 'yes') !== 'no'):?>
 <script>
 // docker.rolling.update: routes the native Update / Update All actions to scripts/rolling_update.
+// Not injected when the plugin is disabled in Settings (ENABLED=no): the native buttons are left alone.
 // docker.js is loaded synchronously in the Docker page, so the globals exist by DOM ready.
 $(function(){
   if (typeof openDocker !== 'function' || typeof updateContainer !== 'function') return;
@@ -25,3 +27,4 @@ $(function(){
   };
 });
 </script>
+<?endif;?>

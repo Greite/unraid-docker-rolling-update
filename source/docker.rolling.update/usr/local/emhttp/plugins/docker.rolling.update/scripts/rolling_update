@@ -430,8 +430,8 @@ function update_bluegreen(array $u): string {
 
 // ---------- native (container unchecked in Settings) ----------
 /** Same sequence as Unraid's own Update: stop -> remove -> recreate. No health gate, no rollback. */
-function update_native(array $u): string {
-  log_line('<b>Strategy: native</b> - container excluded from the rolling update in Settings (no health gate, no rollback)');
+function update_native(array $u, string $why): string {
+  log_line('<b>Strategy: native</b> - '.htmlspecialchars($why).' (no health gate, no rollback)');
   if ($u['wasRunning']) stopContainer_nchan($u['name']);
   if ($u['exists']) removeContainer_nchan($u['name']);
   $cmd = tailscale_wrap($u);
@@ -480,7 +480,12 @@ function update_one(string $name): string {
   }
   $DockerClient->flushCaches();
   $u['newImageID'] = $DockerClient->getImageID($Repository) ?: '';
-  if (rolling_excluded($Name, $cfg)) { $result = update_native($u); forget_webui_info($u['name']); return $result; }
+  $disabled = ($cfg['ENABLED'] ?? 'yes') === 'no';   // re-checked here: the Docker page may have been loaded before the setting changed
+  if ($disabled || rolling_excluded($Name, $cfg)) {
+    $result = update_native($u, $disabled ? 'plugin disabled in Settings' : 'container excluded from the rolling update in Settings');
+    forget_webui_info($u['name']);
+    return $result;
+  }
   $hasHealth  = image_has_health($u['newImageID']) || extra_has_health($info['extra']);
   $u['probe'] = resolve_probe($info['labels'], $hasHealth, $cfg);
   foreach ($u['probe']['warnings'] as $w) log_warn($w);   // R23: logged even if the gate is never reached (container stopped beforehand)

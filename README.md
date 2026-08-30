@@ -26,7 +26,8 @@ Uninstalling restores the native Update button.
 
 Settings → Docker Rolling Update lists every template container, all checked by default. Unchecked containers
 are updated the native way (pull, stop, remove, recreate: no health gate, no rollback), in the same update run.
-Containers created later are handled by the rolling update until unchecked.
+Containers created later are handled by the rolling update until unchecked. *Enable the rolling update* = No
+restores the native buttons for every container while keeping the plugin installed and its settings.
 
 ## Notifications
 
