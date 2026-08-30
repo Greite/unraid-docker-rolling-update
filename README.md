@@ -22,6 +22,12 @@ Uninstalling restores the native Update button.
 | `rolling.timeout` | seconds | Settings (120) |
 | `rolling.grace` | seconds | Settings (15) (if grace > timeout, timeout is raised to grace) |
 
+## Choosing the containers
+
+Settings → Docker Rolling Update lists every template container, all checked by default. Unchecked containers
+are updated the native way (pull, stop, remove, recreate: no health gate, no rollback), in the same update run.
+Containers created later are handled by the rolling update until unchecked.
+
 ## Notifications
 
 Settings → Docker Rolling Update: three independent toggles - success (normal), success with warnings
